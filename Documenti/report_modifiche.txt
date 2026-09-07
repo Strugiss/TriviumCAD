@@ -1,0 +1,229 @@
+╔══════════════════════════════════════════════════════════════╗
+║                    N47Lab — Changelog                        ║
+║         CAD/CAM 3D (PyQt5 + OpenGL + trimesh)                ║
+╚══════════════════════════════════════════════════════════════╝
+
+===============================================================================
+AGGIORNAMENTO 07/09/2026 - v1.2.0 (release)
+===============================================================================
+
+  Riepilogo completo: vedi CHANGELOG.md.
+  Funzioni ora attive: misura distanza/angolo (Ctrl+M / Ctrl+Shift+M con
+  popup "Misura — Scala forma"), snap griglia, chamfer, pattern lineare e
+  circolare, mirror (Specchia), smooth/subdivide/decimate, riparazione mesh
+  (Menu Mesh → Ripara). Profili stampante: 12 (non 13).
+
+===============================================================================
+[22-06-2026] — Riconoscimento topologico "Sposta Faccia" v2
+===============================================================================
+
+  Selezione della faccia basata su componente connessa di facce con normale
+  allineata all'asse del manipolatore (±X, ±Y, ±Z, soglia 40°). Allungamento
+  uniforme dal centro: v[asse] += weight * delta con weight = max(0, v[asse] /
+  half_extent). Le componenti perpendicolari restano invariate. La sezione non
+  si assottiglia.
+
+  File: n47lab.py (mousePressEvent / mouseMoveEvent — DRAG_FACE handler)
+
+===============================================================================
+[22-06-2026] — Splash screen: logo "CAD" 3D
+===============================================================================
+
+  - Logo "CAD" centrato sotto "N47Lab" disegnato con QPainterPath:
+    C = arco 315°→45°, A = cono + barra, D = retta + arco 225°→495°
+  - Effetto ombra 3D con offset (4,4)
+  - Dimensioni 56×72px
+
+===============================================================================
+[22-06-2026] — Face Handles Gizmo (6 maniglie)
+===============================================================================
+
+  - 6 maniglie al centro di ogni faccia del bounding box:
+    X+ / X- (rosso), Y+ / Y- (verde), Z+ / Z- (blu)
+  - Disegno: quadrato + bordo + alpha 15% + freccia 3D a piramide
+  - Offset = max(max_extent×0.3, size×3.0)
+  - Depth test OFF, blend ON
+
+===============================================================================
+[22-06-2026] — Bug "piano che scatta"
+===============================================================================
+
+  CAUSA: _drag_target residuo in _sync_camera() spostava la camera al click
+  successivo. FIX: _drag_target = None in mousePressEvent;
+  _grid_display_list = None in initializeGL.
+
+===============================================================================
+[22-06-2026] — Performance: display list, threading, attributi specifici
+===============================================================================
+
+  - GizmoRenderer: 3 display list (x/y/z) per anello rotazione
+  - glPushAttrib ristretto (ENABLE|CURRENT|POLYGON|LIGHTING|DEPTH)
+  - QThread + _GenericWorker + QProgressDialog per booleane, toolpath,
+    filettatura, arrotondamento. UI non bloccante.
+
+===============================================================================
+[22-06-2026] — Interfaccia: finestra dinamica, colonna sinistra, tutorial
+===============================================================================
+
+  - resize(1280,720), setMinimumSize(960,540)
+  - Colonna sinistra: pulsanti forme in griglia 3×3
+  - TutorialDialog: stile #F2F6FB, bordo #B0C8DF
+  - Sezione "Sposta Faccia" aggiornata
+
+===============================================================================
+[22-06-2026] — Stampa 3D: 12 profili stampante
+===============================================================================
+
+  - Bambu Lab (X1C, P1S, A1, A1 Mini) — MQTT + FTP over TLS
+  - Anycubic (Kobra 3, Kobra 2, Vyper) — FTP, SMB, OctoPrint, Cloud
+  - Creality (K1 Max, K1, Ender 3 V3) — HTTP WiFi, FTP, OctoPrint
+  - Prusa (i3 MK3S+, XL) — PrusaLink, FTP, OctoPrint
+
+===============================================================================
+[05-07-2026] — Filettatura Interna Incisa (booleana DIFFERENZA)
+===============================================================================
+
+  - _compute_thread_mesh usa _surface_radius_at per calcolare il raggio
+    superficie reale su ogni forma nativa (cilindro, sfera, cono, esagono,
+    box, hollow_box, collare, arco, donut)
+  - _compute_subtraction_volume: volume watertight con Layer 0 sempre dentro
+    il foro e Layer 1 modulato nella parete
+  - _compute_thread_surface_projection (fallback): ray-casting per forme
+    importate non native
+  - Interna → boolean_safe(..., "difference") sostituisce l'oggetto originale
+  - Esterna → volume separato (invariato)
+  - Profili: Filo ISO 60°, Trapezio, Arrotondato
+
+  File: n47lab.py (_compute_thread_mesh ~999, _run_threading ~1050)
+
+===============================================================================
+[05-07-2026] — Nuovo TutorialDialog (wizard a schede)
+===============================================================================
+
+  - QStackedWidget con navigazione ← Indietro / Avanti →
+  - Contatore pagina (X / Y)
+  - Checkbox "Nascondi all'avvio" (QSettings)
+  - Mostrato automaticamente dopo lo splash screen
+  - Richiamabile da Opzioni e Aiuto
+
+===============================================================================
+[05-07-2026] — Bugfix: booleane senza Undo + metadata corrotto
+===============================================================================
+
+  - Aggiunto start_operation/end_operation/cancel_operation nelle booleane
+  - Metadata selettivo: name, color, layer dal primo oggetto; locked=False,
+    visible=True, shape_type="boolean" forzati
+  - Aggiunto _refresh_outliner() dopo l'operazione
+  - try/except con rollback su errore
+
+===============================================================================
+[05-07-2026] — Fillet: distanza dagli spigoli + Taubin pesato
+===============================================================================
+
+  - Subdivisione adattiva (max 10000 facce finali)
+  - Edge detection sugli spigoli vivi (face_adjacency_angles > threshold)
+  - Peso gaussiano per vertice: weight = exp(-d² / (2σ²)) con σ = radius×0.6
+  - Taubin filter + weighted blend: original + weight × delta
+  - Volume quasi invariato (-0.65% ÷ -1.79%)
+  - Facce piatte preservate (25-56% allineate)
+  - Applicabile più volte senza esplosione geometrica
+
+  File: n47lab.py (Scene.fillet_selected ~2813, _compute_fillet ~1124)
+
+===============================================================================
+[14-07-2026] — Filettatura Esterna: generazione diretta mesh ottimizzata
+===============================================================================
+
+  - _generate_base_mesh(): mesh cilindrica N×M (N=24..96, M=n_turns×6≤120)
+    seguendo la forma nativa tramite _surface_radius_at
+  - Vertici tappi condivisi con superficie laterale → watertight
+  - _apply_thread_profile(): vertex displacement scava valli
+  - ~3600 vertici / ~7200 facce per cilindro standard
+  - Forme importate/hollow_box/collare: subdivide (max 3 iterazioni)
+  - fps fluidi, dettaglio eccellente
+
+  File: n47lab.py (_generate_base_mesh ~960, _compute_thread_mesh ~999)
+
+===============================================================================
+[17-07-2026] — Adatta Testo: proiezione radiale dal centro forma
+===============================================================================
+
+  - Raycast camera→centro forma per anchor su superficie ESTERNA
+  - Testo centrato sull'ancora
+  - Per ogni vertice: direzione dal centro forma → raycast fino alla
+    superficie esterna (batch, centinaia di raggi)
+  - Spessore preservato: offset Y originale riapplicato lungo la normale
+    della superficie nel punto di impatto
+  - Face normali invertite se puntano contro la direzione del raggio
+  - Rimosso codice duplicato (bug NameError)
+  - Verificato con 3 agenti specializzati (sintassi, algoritmo, API)
+
+  File: n47lab.py (_adapt_text_to_shape ~6552)
+
+===============================================================================
+[17-07-2026] — Sezione 2D→3D completamente riscritta
+===============================================================================
+
+  PROBLEMA: La sezione "da 2D a 3D" non funzionava affatto.
+  - _import_2d_to_3d: usava force='mesh' per SVG/DXF, perdendo poligoni 2D.
+    Per immagini: ConvexHull perdeva dettagli interni.
+  - revolve(): sketch_entities sempre vuoto → non faceva nulla.
+    Usava ConvexHull distorto + implementazione manuale.
+  - loft(): sketch_entities vuoto. Interpolazione mesh errata.
+  - sweep(): sketch_entities vuoto. Percorso elicoidale hardcoded.
+  - sketch_entities: inizializzato vuoto, MAI popolato di geometria.
+
+  SOLUZIONE (basata su trimesh.creation + CadQuery + skimage):
+  - _import_vector_to_3d(): trimesh.load_path() → polygons_full →
+    extrude_polygon() per ogni poligono → merge watertight.
+    Fallback: force='mesh' se load_path fallisce.
+  - _import_image_to_3d(): skimage.measure.find_contours() → Polygon →
+    extrude_polygon(). Fallback: ConvexHull se find_contours fallisce.
+  - _import_2d_to_3d(): delega ai due helper sopra.
+  - revolve(): usa trimesh.creation.revolve(). Profilo da sketch_entities
+    o oggetto selezionato via _profile_from_selection().
+  - loft(): campiona poligoni 2D con _sample_polygon() (punti equidistanti
+    sul perimetro), poi interpola linearmente e genera mesh.
+  - sweep(): usa trimesh.creation.sweep_polygon(). Profilo da sketch o
+    selezione, percorso personalizzabile o predefinito (elica).
+
+  Nuove funzioni:
+    _import_vector_to_3d, _import_image_to_3d,
+    _profile_from_selection, _sample_polygon, _profiles_2d,
+    _get_sweep_profile, _get_sweep_path
+
+  Verifica (AGENTE 3): tutte le mesh sono watertight,
+  sintassi Python ok, funzioni tutte presenti.
+
+  File: n47lab.py (_import_2d_to_3d ~6741, revolve ~2012, loft ~2074, sweep ~2143)
+
+  OTTIMIZZAZIONI SUCCESSIVE:
+  - _normalize_polygon(): normalizza poligoni enormi a target_max=30 e centra su (0,0)
+  - _import_image_to_3d(): ora binarizza l'immagine (soglia 0.4) prima di find_contours
+  - Silhouette-mode: se ≥3 contorni, usa solo il più grande come esterno
+  - Rilevamento buchi: unary_union dei contorni interni + difference dall'esterno
+  - _simplify_contour(): riduce i contorni a ~400 punti massimi
+  - Calibrato con silhouette-svg_.jpg: 10792 vertici, 21620 facce, watertight
+  - PRIMA: 66 poligoni separati → 99632 vertici, mesh "ammasso blu"
+  - DOPO: 1 poligono con buchi → 10792 vertici, silhouette riconoscibile con finestrini
+
+===============================================================================
+STATO ATTUALE
+===============================================================================
+
+  - "Sposta Faccia" con allungamento uniforme dal centro
+  - GIZMO completo: traslazione, rotazione, scala, face handles
+  - Filettatura interna (incisa) ed esterna (volume separato)
+    Profili: Filo ISO 60°, Trapezio, Arrotondato
+  - Booleane con Undo e metadata pulito
+  - Fillet: Taubin pesato con edge detection
+  - CAM (percorsi utensile adattivi)
+  - Stampa 3D diretta (12 profili)
+  - Adatta Testo: proiezione radiale con spessore preservato
+  - Import 2D→3D: SVG/DXF via load_path + extrude_polygon; immagini via find_contours
+  - Rivoluzione (revolve): trimesh.creation.revolve con profilo da sketch/selezione
+  - Loft: campionamento poligoni 2D con corrispondenza punti
+  - Sweep: trimesh.creation.sweep_polygon con profilo + percorso personalizzabile
+  - Rilevamento buchi in silhouette: binarizzazione + unary_union + difference
+  - Undo/Redo (50 step)
+  - Tutorial wizard con navigazione e Nascondi all'avvio

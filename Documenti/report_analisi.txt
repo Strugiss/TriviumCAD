@@ -1,0 +1,114 @@
+N47Lab - Report analisi codice
+================================
+
+Sono 3 le categorie: CRITICO, MEDIO, LIEVE.
+
+Legenda linee: riferimento alla riga nel file n47lab.py (versione corrente).
+
+
+AGGIORNAMENTO 07/09/2026 - v1.2.0
+---------------------------------
+Punti 1, 2, 3, 4 (CRITICI) RISOLTI; punto 10 (chamfer) ATTIVO.
+I riferimenti di riga non sono piu' validi dopo il refactor
+(n47lab.py ora ~5xxx righe). Vedi CHANGELOG.md.
+
+
+-- CRITICI (da sistemare assolutamente) --
+
+1. Doppia finalizzazione operazioni (righe ~1240, 1372, 1462, 1481, 1562...)
+   Ogni operazione (booleane, shell, offset, etc.) chiama end_operation() nel
+   try, ma finally chiama anche cancel_operation(). Le due funzioni cozzano.
+   Fix: togliere la doppia chiamata.
+
+2. smooth() e subdivide() crashano su mesh sostituite (righe 1788-1790, 1812-1814)
+   Dopo "obj = obj.subdivide()" o "obj = filter_laplacian(obj)", obj e' un
+   nuovo oggetto. Poi "self.objects.index(obj)" fallisce perche' il nuovo
+   oggetto non e' in self.objects.
+   Fix: salvare il riferimento originale prima della sostituzione.
+
+3. Parametri rotazione non implementati (riga 5537-5538)
+   Nel pannello Proprieta', le spinbox di rotazione (rot_x, rot_y, rot_z)
+   hanno "pass" come corpo. NON fanno nulla, anche se l'utente le modifica.
+   Fix: implementare l'effettiva rotazione dell'oggetto.
+
+4. _notify() stampa solo in console (riga 2184)
+   Tutte le operazioni (annulla, duplica, booleane, etc.) chiamano _notify()
+   per dare feedback, ma il messaggio finisce solo su stdout, mai visibile
+   all'utente nella status bar.
+   Fix: collegare _notify() alla status bar di CADWindow.
+
+
+-- MEDI (miglioramenti importanti) --
+
+5. VBO ricostruiti tutti su qualsiasi modifica (riga 3354-3357)
+   _invalidate_all_vbos() cancella i VBO di TUTTI gli oggetti anche se ne
+   viene modificato solo uno. Ogni frame successivo deve ricaricare tutto.
+   Fix: invalidare solo l'oggetto modificato.
+
+6. Arrotondamento (fillet) esplode le facce (riga 2282-2287)
+   Fino a 4 iterazioni di subdivide(), ognuna quadruplica le facce (256x).
+   Una mesh di 1000 facce diventa 256.000 facce, poi smoothing. Molto lento.
+   Fix: aggiungere un passo di decimazione dopo, o ridurre le iterazioni max.
+
+7. 7+ except Exception: pass silenziosi nel GizmoRenderer (righe 2555, 2575,
+   2587, 2598, 2613, 2624, 3264)
+   Errori di rendering ignorati. Possono causare bug visivi senza preavviso.
+   Fix: almeno un print con traceback.
+
+8. Rotazione assi dal pannello Proprieta' non funzionante (vedi punto 3)
+   Stessa cosa. Riga 5537-5538: pass.
+
+9. Parametri modificati non salvano undo (righe 5006-5020)
+   Cambiare dimensioni/raggi nel pannello Proprieta' rigenera la mesh ma NON
+   crea uno stato undo. L'utente non puo' tornare indietro.
+   Fix: pushare uno stato undo prima della modifica.
+
+
+-- LIEVI (ottimizzazioni / pulizia) --
+
+10. Code morto: ScannerModule (2410), chamfer() (1421), explode_assembly()
+    (1129), boolean_union/difference/intersection (1242-1249), export_multi()
+    (1178). Funzioni definite ma mai chiamate da nessuna UI.
+
+11. Import inutilizzati (righe 18, 25, 33, 35)
+    shapely.geometry (ridondante), QKeySequence, QTextCharFormat, QTextCursor,
+    QPalette, QTreeWidget, QTreeWidgetItem, QToolButton, QButtonGroup, QSlider.
+
+12. Pattern ripetuto 9x: metadata pop _gl_verts, _gl_normals, etc.
+    Estrarre in una funzione helper _clean_gl_metadata(mesh).
+
+13. Stili GroupBox e pulsanti duplicati (righe 4827-4843, 4856-4872, 4902-4918,
+    5186-5198, 5214-5228). Estrarre in costanti condivise.
+
+14. _draw_mesh() crea un indice sequenziale (np.arange) per chiamare
+    glDrawElements (riga 3396). Si puo' usare direttamente glDrawArrays,
+    evitando l'indice.
+
+15. Box selection chiama gluProject() 8 volte per oggetto (righe 3640-3670).
+    Per 1000 oggetti = 8000 chiamate. Usare un AABB check in screen space.
+
+16. Undo limitato a 50 (riga 792). Potrebbe essere configurabile.
+
+17. Salvataggio .n47 non preserva: assemblies, sketch_entities, dimensioni,
+    clipboard, toolpath, gcode (righe 5876-5883). Tutto perso al reload.
+
+18. Outliner: larghezza min 30px, max 140px (righe 6209-6210) - nomi lunghi
+    illeggibili.
+
+19. Shortcut da tastiera non documentati (righe 4031-4036, 5141-5144)
+    Ctrl+X/C/V/A/M/Space/Esc funzionano ma non compaiono in nessun menu.
+
+20. _new() non chiede salvataggio prima di cancellare la scena (5776-5781).
+
+21. Importa e Apri fanno la stessa cosa (5918-5919) - Importa dovrebbe
+    aggiungere alla scena corrente, Apri sostituire.
+
+22. time.sleep(0.5) all'avvio blocca l'event loop (6471).
+    Usare QTimer.singleShot() invece.
+
+23. Goniometro disegnato ogni frame con QPainter (3535-3549).
+    Disegnare solo quando il gizmo e' visibile e la rotazione e' attiva.
+
+24. Assi di rotazione (goniometro) attivati erroneamente se il mouse passa
+    sopra il centro del gizmo (tolleranza 30px). Causa anelli gialli
+    indesiderati alla base degli oggetti.

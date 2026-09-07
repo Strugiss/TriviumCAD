@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="200" height="200" xmlns="http://www.w3.org/2000/svg">
+  <path d="M20,20 h160 v160 h-160 Z M60,60 h80 v80 h-80 Z" fill-rule="evenodd"/>
+</svg>
