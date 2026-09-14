@@ -1,119 +1,94 @@
-# TriviumCAD — CAD 3D per stampa 3D (by N47Lab)
+# TriviumCAD — CAD 3D open source per la stampa 3D (by N47Lab)
 
-**CAD 3D parametrico/mesh gratuito per stampa 3D — in italiano**
+Dall'idea all'oggetto stampato senza cambiare programma.
 
-TriviumCAD è un ambiente integrato per la modellazione 3D, la progettazione meccanica,
-la generazione di percorsi utensile (CAM) e l'invio diretto delle stampe alla
-stampante 3D. Sviluppato in **Python** con **PyQt5 + OpenGL + trimesh**, è pensato
-per chi vuole passare dall'idea al file stampabile senza cambiare programma.
+[![Licenza: MIT](https://img.shields.io/badge/licenza-MIT-brightgreen?style=flat-square)](LICENSE)
+[![Versione](https://img.shields.io/badge/versione-1.2.0-f0b429?style=flat-square)](https://github.com/Strugiss/TriviumCAD/releases)
+[![Piattaforma](https://img.shields.io/badge/Windows-10%2F11-0078D6?style=flat-square&logo=windows&logoColor=white)]()
+[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white)]()
+[![Test](https://img.shields.io/badge/test-10%20inclusi-brightgreen?style=flat-square)](Test/)
 
-- Versione: **1.2.0**
-- Sviluppato da: **N47Lab Team (Alessandro Tulli)** — © 2026
-- Licenza: **MIT** (vedi [LICENSE](LICENSE))
+![TriviumCAD v1.2.0 — screenshot dell'interfaccia](https://n47lab.altervista.org/triviumcad/immagini/TriviumCAD_v1.2.0_screenshot.png)
 
----
+## Il problema, la soluzione
 
-## Funzionalità chiave
+Chi progetta per la stampa 3D oggi passa da un CAD, poi uno slicer, poi un programma per l'invio: tre strumenti, tre formati, tre occasioni di errore. **TriviumCAD** unisce tutto in un unico ambiente: modelli con 9 forme parametriche, combini con booleane, filetti, misuri, generi i percorsi CAM e invii direttamente a 12 profili stampante — dalla stessa finestra, con una GUI in italiano. È scritto in Python (PyQt5 + OpenGL + trimesh), è gratuito, open source (MIT) ed è pensato per la stampa FDM reale, non per le demo.
 
-| Funzionalità | Descrizione |
+## Funzionalità
+
+| Funzionalità | Dettagli |
 |---|---|
-| ⭐ **Filettatura analitica** | Filettatura esterna e interna con 3 profili (Filo ISO 60°, Trapezio, Arrotondato) e 5 modalità (Auto, Metrico, UNF, UNC, Gas). Per 9 forme native la filettatura segue il profilo reale della superficie, non il bounding box. |
-| ⭐ **Invio diretto alle stampanti** | 8 modalità di invio: 7 protocolli diretti (Bambu Lab MQTT+FTP, Creality HTTP, PrusaLink, OctoPrint, FTP, SMB, Anycubic Cloud) + esportazione con profilo stampante. 12 profili precaricati (Bambu Lab X1C/P1S/A1/A1 Mini, Anycubic Kobra 3/Kobra 2/Vyper, Creality K1 Max/K1/Ender 3 V3, Prusa i3 MK3S+/XL) con volume di stampa, ugelli e impostazioni di default. |
-| ⭐ **Import 2D → 3D con buchi** | Importa SVG, DXF e immagini (anche foto di silhouette): l'esterno diventa un solido estruso e i contorni interni diventano buchi automaticamente (binarizzazione + rilevamento contorni, fino a 400 punti per contorno). |
-| Primitive | 9 primitive parametriche: Cubo, Cilindro, Sfera, Cono, Collare, Esagono, Spirale, Arco, Scatola vuota. |
-| Testo 3D | Creazione testo, adattamento alla superficie della forma e bassorilievo. |
-| Booleane | Unione, sottrazione, intersezione con 6 livelli di fallback per mesh difficili. |
-| Guscio e fillet | Guscio su forme cave/aperte e arrotondamento spigoli (Taubin pesato con edge detection). |
-| Slicer | Taglio a fette lungo gli assi con offset e numero di pezzi. |
-| CAM | Percorsi utensile adattivi zig-zag (diametro utensile, passo laterale, quota di sicurezza, avanzamento). |
-| Gizmo | Sposta, scala e ruota con goniometro a tacche (15°/45°); trascina le facce per allungare la forma. |
-| Selezione | Click ray-cast, box select, Ctrl/Shift+Click per multi-selezione. |
-| Undo/Redo | Fino a 50 passi (Ctrl+Z / Ctrl+Y). |
-| Export | STL, OBJ, PLY, 3MF, GLB. |
-| Console | Console Python integrata con accesso diretto a scena e oggetti selezionati. |
-| Tutorial | Wizard di 11 pagine all'avvio, richiamabile da Opzioni/Aiuto. |
-| Misura distanza/angolo | Ctrl+M (2 clic) e Ctrl+Shift+M (3 clic); popup "Misura — Scala forma" con scala uniforme centrata e undo. |
-| Snap griglia | Allineamento al reticolo (Opzioni → Snap Griglia). |
-| Chamfer | Smussatura spigoli (Menu Modifica → Chamfer…). |
-| Pattern lineare/circolare | Copie di oggetti su riga o in cerchio (Menu Modifica → Pattern lineare… / Pattern circolare…). |
-| Mirror | Specchiatura lungo gli assi (Menu Modifica → Specchia). |
-| Smooth/Subdivide/Decimate | Rifinitura della mesh (Menu Mesh). |
-| Riparazione mesh | Ricostruzione di mesh non watertight (Menu Mesh → Ripara). |
-
----
+| ⭐ **Filettatura analitica** | Filetti esterni e interni con 3 profili (ISO 60°, trapezio, arrotondato) e 5 modalità (Auto, Metrico, UNF, UNC, Gas). Su 9 forme native la filettatura segue il profilo reale della superficie, non il bounding box |
+| ⭐ **Invio diretto alla stampante** | 7 protocolli (Bambu Lab MQTT+FTP, Creality HTTP, PrusaLink, OctoPrint, FTP, SMB, Anycubic Cloud) + esportazione. 12 profili precaricati (Bambu Lab X1C/P1S/A1/A1 Mini, Anycubic Kobra 3/2/Vyper, Creality K1 Max/K1/Ender 3 V3, Prusa i3 MK3S+/XL) |
+| ⭐ **Import 2D → 3D con buchi** | SVG, DXF e immagini (anche silhouette da foto): l'esterno diventa un solido estruso, i contorni interni diventano buchi automaticamente (fino a 400 punti per contorno) |
+| **9 forme parametriche** | Cubo, Cilindro, Sfera, Cono, Collare, Esagono, Spirale, Arco, Scatola vuota — parametri aggiornati in tempo reale |
+| **Booleane** | Unione, sottrazione, intersezione con 6 livelli di fallback per mesh difficili |
+| **Testo 3D** | Creazione testo, adattamento alla superficie e bassorilievo |
+| **GIZMO 3D** | Sposta, scala e ruota con goniometro a tacche (15°/45°); trascina le facce per allungare la forma |
+| **CAM** | Percorsi utensile adattivi zig-zag: diametro utensile, passo laterale, quota di sicurezza, avanzamento |
+| **Slice multi-pezzo** | Taglio a fette lungo X/Y/Z con offset e numero di pezzi per stampe grandi |
+| **Misura e modifica** | Misura distanza (Ctrl+M) e angolo (Ctrl+Shift+M), chamfer, fillet, guscio, pattern lineare/circolare, mirror, smooth, subdivide, decimate, riparazione mesh |
+| **Undo/Redo** | Fino a 50 passi (Ctrl+Z / Ctrl+Y) |
+| **Export** | STL, OBJ, PLY, 3MF, GLB |
+| **Console Python** | Integrata, con accesso diretto a scena e oggetti selezionati |
+| **Tutorial** | Wizard di 11 pagine all'avvio, richiamabile da Opzioni/Aiuto |
+| **Test** | 10 test inclusi (profili di filettatura e mesh) nella cartella `Test/` |
 
 ## Installazione
 
-Richiede **Python 3.10+** (Windows, macOS, Linux).
+### Windows (installer pronto)
+
+1. Scarica **TriviumCAD_Setup_1.2.0.exe**: [download diretto](https://n47lab.altervista.org/triviumcad/file/TriviumCAD_Setup_1.2.0.exe) (anche dalla [pagina del sito](https://n47lab.altervista.org/triviumcad/))
+2. Esegui l'installer: crea le scorciatoie e associa l'estensione `.n47` (doppio clic per aprire una scena)
+3. Avvia **TriviumCAD** dal menu Start
+
+### Da sorgente (Windows, macOS, Linux)
+
+Richiede **Python 3.10+**.
 
 ```bash
 pip install trimesh numpy shapely PyQt5 PyOpenGL scipy pillow scikit-image requests paho-mqtt
-```
-
-Dipendenze **opzionali** (funzionano in fallback se assenti, ma attivano funzioni extra):
-
-| Pacchetto | Necessario per |
-|---|---|
-| `pillow` + `scikit-image` | Import immagini → 3D (rilevamento contorni e buchi) |
-| `requests` | Invio a stampanti via HTTP (Creality, PrusaLink, OctoPrint, Anycubic Cloud) |
-| `paho-mqtt` | Invio a stampanti Bambu Lab (MQTT + FTP over TLS) |
-| `scipy` | Ottimizzazioni e fallback di robustezza (indice spaziale, guscio convesso, sobel) |
-
-## Avvio
-
-```bash
 python triviumcad.py
 ```
 
-## Struttura del progetto
+Dipendenze opzionali: `pillow` + `scikit-image` (import immagini → 3D), `requests` (invio HTTP), `paho-mqtt` (Bambu Lab), `scipy` (fallback di robustezza).
+
+## Quick Start
+
+1. **Apri il wizard** (11 pagine all'avvio) e crea la prima forma da *Crea → Primitive*: il viewport si naviga con orbit, pan e zoom
+2. **Modella**: combina le forme con le booleane, aggiungi la filettatura (3 profili, 5 modalità) e misura con Ctrl+M
+3. **Stampa**: scegli uno dei 12 profili e invia direttamente, oppure esporta STL/3MF per il tuo slicer
+
+## Struttura del repository
 
 ```
-TestN47Lab/
-├── triviumcad.py         # Applicazione completa: UI (PyQt5), rendering OpenGL, logica
-├── core/                # Modulo core, senza dipendenze Qt
-│   ├── constants.py     # Costanti, libreria forme, profili stampante
-│   ├── primitives.py    # Generazione mesh primitive e testo 3D
-│   ├── mesh_ops.py      # Booleane, fillet, validazione mesh
-│   ├── thread.py        # Filettatura (profili, mesh, sottrazione)
-│   ├── cam.py           # Percorsi utensile adattivi
-│   ├── scene.py         # Scena, undo/redo, operazioni, scanner
-│   └── utils.py         # Utility (es. NumpyEncoder)
-├── TriviumCAD.spec       # Build PyInstaller
-└── TriviumCAD_setup.iss  # Installer Inno Setup
+TriviumCAD/
+├── triviumcad.py         # applicazione completa: UI PyQt5, viewport OpenGL, logica
+├── core/                 # motore senza dipendenze Qt
+│   ├── constants.py      # costanti, libreria forme, profili stampante
+│   ├── primitives.py     # primitive parametriche e testo 3D
+│   ├── mesh_ops.py       # booleane, fillet, riparazione mesh
+│   ├── thread.py         # filettatura: profili, mesh, sottrazione
+│   ├── cam.py            # percorsi utensile adattivi zig-zag
+│   └── scene.py          # scena, undo/redo, operazioni
+├── Test/                 # 10 test + file di prova per import (SVG/DXF)
+├── Documenti/            # documentazione di progetto
+├── TriviumCAD.spec       # build PyInstaller
+└── TriviumCAD_setup.iss  # installer Windows (Inno Setup)
 ```
 
-Il modulo `core/` è stato estratto dalla UI in modo da poter essere testato e
-riutilizzato senza caricare Qt.
+## Link
 
-## Build
-
-### Eseguibile (PyInstaller)
-
-```bash
-pyinstaller TriviumCAD.spec
-```
-
-Output in `dist\TriviumCAD\` (collezione one-folder con `TriviumCAD.exe`, icona `favicon.ico`).
-
-### Installer Windows (Inno Setup)
-
-1. Compila prima con PyInstaller (sopra).
-2. Apri `TriviumCAD_setup.iss` in Inno Setup 6 e compila.
-   Output: `installer\TriviumCAD_Setup_1.2.0.exe` — installa, crea scorciatoie,
-   associa l'estensione `.n47` alle scene TriviumCAD (doppio clic per aprire).
-
-## Screenshot
-
-*(Sezione riservata: le immagini verranno aggiunte qui.)*
-
-## Changelog
-
-Vedi [CHANGELOG.md](CHANGELOG.md) per lo storico delle versioni.
-
-## Tutorial
-
-Guida completa all'uso: [TUTORIAL.md](TUTORIAL.md).
+- **Sito N47Lab**: https://n47lab.altervista.org/
+- **TriviumCAD — sito dedicato**: https://n47lab.altervista.org/triviumcad/
+- **Download**: https://n47lab.altervista.org/triviumcad/file/TriviumCAD_Setup_1.2.0.exe
+- **Guide e tutorial**: [TUTORIAL.md](TUTORIAL.md) · [CHANGELOG.md](CHANGELOG.md)
 
 ## Licenza
 
-MIT — vedi [LICENSE](LICENSE). © 2026 N47Lab Team.
+MIT — vedi [LICENSE](LICENSE). © 2026 N47Lab (Alessandro Tulli).
+
+## Contatti
+
+**N47Lab** — laboratorio di ricerca e sviluppo software.
+Sito: https://n47lab.altervista.org/ · GitHub: [@Strugiss](https://github.com/Strugiss)
