@@ -1,6 +1,6 @@
 FEATURE MANCANTI (top)
 Priorità	Feature
-HIGH	Sistema sketch 2D (solo booleano placeholder)
+FATTO (v1)	Sistema sketch 2D — 2PenAxE (multi-piano XY/XZ/YZ, snap/ancore, quote live, persistenza .n47); constraint solver ancora escluso
 HIGH	Modellazione parametrica / constraint solver
 MED	Vista in sezione / clipping interattivo
 MED	Quote e annotazioni persistenti

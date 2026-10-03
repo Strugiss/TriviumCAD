@@ -190,35 +190,35 @@ def _generate_blender_spiral(radius: float, height: float, turns: int, thickness
     return mesh
 
 def _generate_blender_arc(outer_r: float, inner_r: float, angle_deg: float, height: float) -> trimesh.Trimesh:
-    from shapely.geometry import Point
+    from shapely.geometry import Point, Polygon as _ArcPolygon
     angle_deg = min(360, max(1, angle_deg))
-    angle_rad = math.radians(angle_deg)
-    outer = Point(0, 0).buffer(outer_r, resolution=64)
-    inner = Point(0, 0).buffer(inner_r, resolution=64)
-    ring = outer.difference(inner)
     if angle_deg >= 360:
-        mesh = trimesh.creation.extrude_polygon(ring, height=height)
+        outer = Point(0, 0).buffer(outer_r, resolution=64)
+        inner = Point(0, 0).buffer(inner_r, resolution=64)
+        mesh = trimesh.creation.extrude_polygon(outer.difference(inner), height=height)
         mesh.fix_normals()
         return mesh
-    from shapely.affinity import rotate
-    from shapely.geometry import box as sbox
-    cut = sbox(-outer_r * 2, -outer_r * 2, 0, outer_r * 2)
-    cut = rotate(cut, -(90 - angle_deg / 2), origin=(0, 0), use_radians=False)
-    sector = ring.intersection(cut)
+    if inner_r <= 0 or inner_r >= outer_r:
+        return _generate_blender_collare(outer_r, inner_r, height)
+    # Settore anulare di ampiezza ESATTA angle_deg (arco da 90 in senso antiorario,
+    # 2 segmenti per grado) invece del semipiano, che tagliava sempre ~180.
+    n_arc = max(16, int(2 * angle_deg))
+    a_start = math.radians(90.0)
+    a_end = a_start + math.radians(angle_deg)
+    angs = [a_start + (a_end - a_start) * i / n_arc for i in range(n_arc + 1)]
+    pts = [(outer_r * math.cos(t), outer_r * math.sin(t)) for t in angs]
+    pts += [(inner_r * math.cos(t), inner_r * math.sin(t)) for t in reversed(angs)]
+    sector = _ArcPolygon(pts)
+    if not sector.is_valid:
+        sector = sector.buffer(0)
     if sector.is_empty:
         return _generate_blender_collare(outer_r, inner_r, height)
-    polys = [sector] if sector.geom_type == 'Polygon' else [g for g in sector.geoms if g.geom_type == 'Polygon']
-    all_verts, all_faces, offset = [], [], 0
-    for p in polys:
-        m = trimesh.creation.extrude_polygon(p, height=height)
-        if m and len(m.vertices) > 0:
-            all_verts.append(m.vertices)
-            all_faces.append(m.faces + offset)
-            offset += len(m.vertices)
-    if not all_verts:
-        return _generate_blender_collare(outer_r, inner_r, height)
-    mesh = trimesh.Trimesh(vertices=np.vstack(all_verts), faces=np.vstack(all_faces))
-    mesh.remove_unreferenced_vertices()
+    if sector.geom_type != 'Polygon':
+        polys = [g for g in sector.geoms if g.geom_type == 'Polygon']
+        if not polys:
+            return _generate_blender_collare(outer_r, inner_r, height)
+        sector = max(polys, key=lambda p: p.area)
+    mesh = trimesh.creation.extrude_polygon(sector, height=height)
     mesh.fix_normals()
     return mesh
 
@@ -359,5 +359,6 @@ def _generate_blender_hollow_box(width: float, height: float, depth: float, wall
                 result = sliced
         result.fix_normals()
         return result
-    except Exception:
+    except Exception as e:
+        print(f"ERRORE: _generate_blender_hollow_box fallita ({e}): uso il cubo pieno")
         return outer

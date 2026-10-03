@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Test dei profili filetto sul CODICE REALE: import da core/ di TestN47Lab.
+"""Test dei profili filetto sul CODICE REALE: import da core/ di TriviumCAD.
 
 Anti-drift: nessuna funzione copiata. Nel core non esistono disp_filo/
 disp_trap/disp_arrot (copie obsolete del vecchio test): i profili reali sono
@@ -7,8 +7,8 @@ _r_mod_profile (modulazione normalizzata) e _get_profile_2d (dimensioni in mm),
 entrambi in core/thread.py. Eseguibile con `python test_profili.py` e pytest."""
 import sys, os, math
 
-CORE_DIR = r"C:\Users\Utente\Downloads\Esperimento\TestN47Lab"
-if not os.path.isdir(CORE_DIR):
+CORE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if not os.path.isdir(os.path.join(CORE_DIR, "core")):
     raise SystemExit("CORE_DIR non trovato: %s" % CORE_DIR)
 sys.path.insert(0, CORE_DIR)
 

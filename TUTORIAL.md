@@ -1,6 +1,6 @@
 # Tutorial TriviumCAD
 
-Guida all'uso di **TriviumCAD** — CAD 3D parametrico/mesh gratuito per stampa 3D (v1.2.0).
+Guida all'uso di **TriviumCAD** — CAD 3D parametrico/mesh gratuito per stampa 3D (v1.2.1).
 
 ---
 
@@ -29,7 +29,7 @@ Guida all'uso di **TriviumCAD** — CAD 3D parametrico/mesh gratuito per stampa 
 
 | Zona | Contenuto |
 |---|---|
-| **Toolbar (in alto)** | Da 2 a 3D, Nuovo/Apri/Salva, Booleane, Guscio, Snap, Magneti, donazioni, sito |
+| **Toolbar (in alto)** | Da 2 a 3D, 2PenAxE (sketch 2D multi-piano), Nuovo/Apri/Salva, Booleane, Guscio, Snap, Magneti, donazioni, sito |
 | **Pannello sinistro** | Forme primitive (griglia), Meccanica (Filettatura, Affetta, Arrotonda), CAM |
 | **Pannello destro** | Testo 3D, Parametri (posizione/rotazione), Analisi mesh |
 | **Outliner (destra)** | Elenco oggetti con layer; clic per selezionare, Ctrl+clic per multi-selezione |
@@ -48,7 +48,7 @@ Comandi di vista: **Rotella** = zoom · **Ctrl + SX + Drag** = orbita 360° ·
 4. **Filettatura**: seleziona un cilindro → pannello Meccanica → *Filettatura*:
    Tipo **Esterna**, Modalità **Metrico**, Passo 1.5 → **Applica**.
 5. **Export**: menu **File → Esporta** → scegli **STL** (o OBJ/PLY/3MF/GLB).
-6. **Invia alla stampante**: menu **File → Stampa 3D** (o pulsante dedicato) →
+6. **Invia alla stampante**: menu **File → Invia alla stampante...** (o pulsante dedicato) →
    scegli profilo stampante, protocollo, IP e credenziali → **Invia**.
 
 ## 4. Funzioni per sezione
@@ -178,7 +178,7 @@ Le frecce **↑/↓** richiamano la cronologia dei comandi.
 
 ### 4.14 Profili stampante e protocolli
 
-Menu **File → Stampa 3D**: scegli il modello (12 profili precaricati) e il
+Menu **File → Invia alla stampante...**: scegli il modello (12 profili precaricati) e il
 protocollo (8 voci: 7 protocolli diretti + *"solo esporta"*):
 
 | Protocollo | Uso |
@@ -226,6 +226,29 @@ Menu **Mesh** (barra dei menu):
 | **Decimate…** | Riduzione del numero di facce. |
 | **Ripara** | Ricostruzione di mesh non watertight (riparazione mesh). |
 
+### 4.18 2PenAxE — Sketch 2D multi-piano
+
+Pulsante **2PenAxE** in toolbar: apre una finestra modale con **due pannelli
+affiancati**, ognuno con piano di lavoro libero **XY / XZ / YZ** e vista 3D
+orbitabile (rotazione, zoom, pan). Ciò che disegni è in **millimetri reali** e
+compare **in tempo reale** nella vista 3D della finestra principale; riaprendo
+il file `.n47` lo sketch è di nuovo modificabile.
+
+| Elemento | Funzione |
+|---|---|
+| Strumenti | Linea, Polilinea, Rettangolo, Cerchio, Arco, Selezione/sposta, Gomma, Misure (tooltip su ogni pulsante). |
+| Viste standard | **Alto** (XY), **Fronte** (XZ), **Lato** (YZ), **Isometrica**; si applicano al pannello attivo. |
+| Controlli vista 3D | Rotazione 360°, Zoom, Pan (trascina nel pannello); rotella = zoom, tasto centrale = pan, tasto destro = rotazione. |
+| Ancore | Endpoint, Midpoint, Centri, Intersezioni, Proiezioni assi, Origine, Griglia: checkbox per attivarle; il marcatore ambra mostra l'aggancio al cursore. |
+| Quote live | Lunghezza, raggio, larghezza × altezza e angolo mentre disegni. |
+| Griglia | Passo reale in mm (1–50 mm) dal menu in basso; snap ai multipli con l'ancora «Griglia». |
+| Undo/Redo | `Ctrl+Z` / `Ctrl+Y` (o pulsanti ↶ ↷) all'interno della finestra. |
+| OK / Applica / Annulla | **OK** conferma e chiude; **Applica** conferma senza chiudere; **Annulla** (o X) ripristina lo stato di apertura. |
+
+Suggerimenti: doppio clic o `Invio` termina una polilinea; `Esc` annulla il
+disegno in corso; `Canc` elimina l'entità selezionata. Se la vista è di taglio
+(es. piano XY guardato di fronte) ruota la vista per disegnare.
+
 ## 5. Scorciatoie da tastiera
 
 | Tasto | Azione |
@@ -233,7 +256,8 @@ Menu **Mesh** (barra dei menu):
 | `Ctrl+Z` | Annulla |
 | `Ctrl+Y` / `Ctrl+Shift+Z` | Ripristina |
 | `Ctrl+A` | Seleziona tutto |
-| `Ctrl+D` | Deseleziona tutto |
+| `Ctrl+D` | Duplica |
+| `Ctrl+Shift+D` | Deseleziona tutto |
 | `X` / `C` / `V` | Taglia / Copia / Incolla (senza Ctrl) |
 | `Canc` (Del) | Elimina selezionati |
 | `Esc` | Deseleziona |

@@ -3,14 +3,14 @@ N47Lab - Report analisi codice
 
 Sono 3 le categorie: CRITICO, MEDIO, LIEVE.
 
-Legenda linee: riferimento alla riga nel file n47lab.py (versione corrente).
+Legenda linee: riferimento alla riga nel file triviumcad.py (versione corrente).
 
 
 AGGIORNAMENTO 07/09/2026 - v1.2.0
 ---------------------------------
 Punti 1, 2, 3, 4 (CRITICI) RISOLTI; punto 10 (chamfer) ATTIVO.
 I riferimenti di riga non sono piu' validi dopo il refactor
-(n47lab.py ora ~5xxx righe). Vedi CHANGELOG.md.
+(triviumcad.py ora ~5xxx righe). Vedi CHANGELOG.md.
 
 
 -- CRITICI (da sistemare assolutamente) --

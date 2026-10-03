@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Test della mesh filettata sul CODICE REALE: import da core/ di TestN47Lab.
+"""Test della mesh filettata sul CODICE REALE: import da core/ di TriviumCAD.
 
 Anti-drift: nessuna funzione copiata nel test. Le funzioni testate sono
 _compute_thread_mesh, _generate_base_mesh, _get_profile_2d, _r_mod_profile
@@ -9,8 +9,8 @@ import sys, os, math
 import numpy as np
 import trimesh
 
-CORE_DIR = r"C:\Users\Utente\Downloads\Esperimento\TestN47Lab"
-if not os.path.isdir(CORE_DIR):
+CORE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if not os.path.isdir(os.path.join(CORE_DIR, "core")):
     raise SystemExit("CORE_DIR non trovato: %s" % CORE_DIR)
 sys.path.insert(0, CORE_DIR)
 

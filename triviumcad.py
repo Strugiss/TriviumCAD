@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-TriviumCAD v1.2.0
+TriviumCAD v1.2.1
 Versione completa con funzionalità CAD e CAM.
 Copyright (c) 2026 N47Lab Team - Tutti i diritti riservati.
 """
@@ -9,6 +9,7 @@ Copyright (c) 2026 N47Lab Team - Tutti i diritti riservati.
 import sys
 import os
 import math
+import copy
 import json
 import time
 import numpy as np
@@ -22,7 +23,7 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple, Set
 
 # Importazioni PyQt5 - DEVE ESSERE PRIMA DELLE DEFINIZIONI DI CLASSI
-from PyQt5.QtCore import Qt, QTimer, QEvent, QSize, QPoint, QPointF, QRect, QRectF, QObject, pyqtSignal, QSettings
+from PyQt5.QtCore import Qt, QTimer, QEvent, QSize, QPoint, QPointF, QRect, QRectF, QObject, pyqtSignal, QSettings, QStandardPaths
 from PyQt5.QtGui import QFont, QFontMetrics, QSurfaceFormat, QPainter, QPainterPath, QColor, QPen, QKeySequence, QTextCharFormat, QTextCursor, QIcon, QPixmap, QPalette
 from PyQt5.QtGui import QDesktopServices
 from PyQt5.QtCore import QUrl
@@ -50,6 +51,10 @@ from core.constants import (
     APP_NAME,
     BACKGROUND_COLOR, TEXT_COLOR, BORDER_COLOR, BUTTON_COLOR,
     BUTTON_HOVER, BUTTON_PRESSED,
+    BG_PAGE, BG_PANEL, BG_CARD, BG_ELEV, BORDER_SOFT,
+    AMBER, AMBER_LIGHT, AMBER_DARK, AMBER_DIM, AMBER_FAINT,
+    BRASS, BRASS_LIGHT, TEXT_ON_AMBER, GREEN_CRT, GREEN_DIM,
+    TEXT_BODY, TEXT_MUTED, FONT_HEAD, FONT_BODY, FONT_MONO,
     NEUTRAL_COLORS, SHAPE_LIBRARY, PRINTER_PROFILES,
 )
 from core import __version__ as VERSION
@@ -59,6 +64,7 @@ from core.mesh_ops import create_mesh, validate_and_place_mesh, boolean_safe, _e
 from core.thread import _compute_thread_mesh, _compute_subtraction_volume
 from core.cam import _compute_adaptive_path
 from core.scene import Scene, _UndoManager, ScannerModule
+from sketch import SketchDialog, entity_to_3d_paths
 # =============================================================================
 # WORKER THREAD PER OPERAZIONI BLOCCANTI
 # =============================================================================
@@ -336,11 +342,16 @@ class GizmoRenderer:
             mouse_x = position.x() * device_pixel_ratio
             mouse_y = position.y() * device_pixel_ratio
             tolerance = 30
+            # I quadratini di rotazione (chiavi 'rh*') sono piccoli: con la tolleranza
+            # da handle grande (30 px) intercettavano il trascinamento del corpo
+            # dell'oggetto. Tolleranza dedicata più stretta per la rotazione.
+            rot_tolerance = 15
             best_key = None
             best_dist = tolerance
             for key, (screen_x, screen_y) in self.points_2d.items():
                 dist = math.hypot(mouse_x - screen_x, mouse_y - screen_y)
-                if dist < best_dist:
+                limit = rot_tolerance if key.startswith('rh') else tolerance
+                if dist < limit and dist < best_dist:
                     best_dist = dist
                     best_key = key
             if best_key:
@@ -732,6 +743,32 @@ class GizmoRenderer:
 # BLOCCO 2: OPENGL WIDGET (CON TUTTE LE CORREZIONI RICHIESTE)
 # =============================================================================
 # === OPENGL WIDGET ===
+class _MeasureOverlay(QWidget):
+    """Widget trasparente sopra la viewport 3D per l'overlay 2D della misura.
+
+    QPainter dentro paintGL di QOpenGLWidget non produce output e il pattern
+    beginNativePainting/endNativePainting e' risultato instabile su Windows:
+    l'overlay viene quindi disegnato da questo widget figlio trasparente e
+    non interattivo (i click passano al GLWidget sottostante).
+    """
+
+    def __init__(self, gl_widget):
+        super().__init__(gl_widget)
+        self._gl = gl_widget
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.hide()
+
+    def paintEvent(self, event):
+        try:
+            p = QPainter(self)
+            p.setRenderHint(QPainter.Antialiasing)
+            self._gl._draw_measurement_overlay(p)
+            p.end()
+        except Exception as e:
+            print(f"Errore in _MeasureOverlay.paintEvent: {e}")
+
+
 class GLWidget(QOpenGLWidget):
     def __init__(self, scene, window):
         super().__init__()
@@ -759,6 +796,7 @@ class GLWidget(QOpenGLWidget):
         self.physical_width = 1000
         self.physical_height = 800
         self.gizmo = GizmoRenderer()
+        self._measure_overlay = _MeasureOverlay(self)
         self._gl_ready = False
         self.frames = 0
         self._modelview_matrix = None
@@ -787,7 +825,8 @@ class GLWidget(QOpenGLWidget):
     
     def initializeGL(self):
         try:
-            glClearColor(0.06, 0.06, 0.08, 1.0)
+            # Sfondo viewport = bg-deep dello STANDARD_VISIVO (#0C1E36).
+            glClearColor(0.047, 0.118, 0.212, 1.0)
             glClearDepth(1.0)
             
             glEnable(GL_DEPTH_TEST)
@@ -853,6 +892,9 @@ class GLWidget(QOpenGLWidget):
             self.physical_height = physical_height
             
             glViewport(0, 0, physical_width, physical_height)
+            
+            if self._measure_overlay is not None:
+                self._measure_overlay.setGeometry(0, 0, width, height)
         except Exception as e:
             print(f"Errore in resizeGL: {e}")
     
@@ -909,14 +951,16 @@ class GLWidget(QOpenGLWidget):
             
             self._draw_rulers_qt()
             self._draw_goniometer_labels()
-            self._draw_measurement_overlay()
             
             if self.selection_mode and self.selection_box_start and self.selection_box_end:
                 self._draw_selection_box()
             
             self._draw_toolpaths()
+            self._draw_sketch_2d()
             
             self.frames += 1
+            if self._measure_overlay is not None and self._measure_overlay.isVisible():
+                self._measure_overlay.update()
         except Exception as e:
             print(f"Errore in paintGL: {e}")
     
@@ -1228,6 +1272,36 @@ class GLWidget(QOpenGLWidget):
         
         glEnable(GL_LIGHTING)
     
+    def _draw_sketch_2d(self):
+        """Disegna le linee dello sketch 2PenAxE nella scena 3D (overlay ambra).
+
+        Le entità arrivano da `scene.sketch_2d_entities` (modello 2PenAxE) e
+        vengono convertite in percorsi 3D da sketch.entity_to_3d_paths: stesse
+        coordinate mm usate dalla finestra di sketch (WYSIWYG).
+        """
+        entities = getattr(self.scene, "sketch_2d_entities", None)
+        if not entities:
+            return
+        try:
+            glPushAttrib(GL_ENABLE_BIT | GL_CURRENT_BIT | GL_LINE_BIT | GL_DEPTH_BUFFER_BIT)
+            glDisable(GL_LIGHTING)
+            glDisable(GL_DEPTH_TEST)
+            glEnable(GL_BLEND)
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+            glEnable(GL_LINE_SMOOTH)
+            glLineWidth(2.0)
+            # Ambra del precetto (#f0b429) con leggera trasparenza.
+            glColor4f(0.941, 0.706, 0.161, 0.95)
+            for ent in entities:
+                for path in entity_to_3d_paths(ent):
+                    glBegin(GL_LINE_STRIP)
+                    for x, y, z in path:
+                        glVertex3f(float(x), float(y), float(z))
+                    glEnd()
+            glPopAttrib()
+        except Exception as e:
+            print(f"[TriviumCAD] _draw_sketch_2d: {e}")
+    
     def _grid(self):
         try:
             if self._grid_display_list is None:
@@ -1237,13 +1311,13 @@ class GLWidget(QOpenGLWidget):
                 glBegin(GL_LINES)
                 for i in range(-extent, extent + 1, 1):
                     if i == 0:
-                        color = [0.45, 0.45, 0.55]
+                        color = [0.16, 0.22, 0.33]
                     elif i % 100 == 0:
-                        color = [0.30, 0.30, 0.40]
+                        color = [0.24, 0.34, 0.50]
                     elif i % 10 == 0:
-                        color = [0.22, 0.22, 0.30]
+                        color = [0.17, 0.25, 0.38]
                     else:
-                        color = [0.14, 0.14, 0.20]
+                        color = [0.11, 0.17, 0.28]
                     glColor3f(*color)
                     glVertex3f(i, -extent, 0)
                     glVertex3f(i, extent, 0)
@@ -1252,19 +1326,21 @@ class GLWidget(QOpenGLWidget):
                 glEnd()
                 glLineWidth(2.0)
                 glBegin(GL_LINES)
-                glColor3f(0.50, 0.50, 0.55)
+                # Assi centrali nella convenzione standard 3D:
+                # X = rosso, Y = verde, Z = blu.
+                glColor3f(0.90, 0.30, 0.30)
                 glVertex3f(-extent, 0, 0)
                 glVertex3f(extent, 0, 0)
-                glColor3f(0.50, 0.50, 0.55)
+                glColor3f(0.30, 0.85, 0.35)
                 glVertex3f(0, -extent, 0)
                 glVertex3f(0, extent, 0)
-                glColor3f(0.50, 0.50, 0.55)
+                glColor3f(0.35, 0.55, 1.00)
                 glVertex3f(0, 0, -extent)
                 glVertex3f(0, 0, extent)
                 glEnd()
                 glLineWidth(2.0)
                 glBegin(GL_LINES)
-                glColor3f(0.30, 0.40, 0.55)
+                glColor3f(0.24, 0.34, 0.50)
                 glVertex3f(-extent, -extent, 0)
                 glVertex3f(extent, -extent, 0)
                 glVertex3f(extent, -extent, 0)
@@ -1292,15 +1368,15 @@ class GLWidget(QOpenGLWidget):
             w = self.width()
             h = self.height()
             ruler_sz = 18
-            p.fillRect(0, 0, w, ruler_sz, QColor(35, 35, 45, 200))
-            p.fillRect(0, ruler_sz, ruler_sz, h - ruler_sz, QColor(35, 35, 45, 200))
-            p.setPen(QPen(QColor(160, 160, 180), 1))
+            p.fillRect(0, 0, w, ruler_sz, QColor(16, 36, 63, 200))
+            p.fillRect(0, ruler_sz, ruler_sz, h - ruler_sz, QColor(16, 36, 63, 200))
+            p.setPen(QPen(QColor(159, 179, 204), 1))
             step = 50
             for x in range(step, w, step):
                 p.drawLine(x, 0, x, ruler_sz // 2)
             for y in range(ruler_sz + step, h, step):
                 p.drawLine(0, y, ruler_sz // 2, y)
-            p.setPen(QPen(QColor(200, 200, 220), 1))
+            p.setPen(QPen(QColor(221, 230, 245), 1))
             f = QFont("Segoe UI", 7)
             p.setFont(f)
             for x in range(step, w, step):
@@ -1320,7 +1396,7 @@ class GLWidget(QOpenGLWidget):
             p.setRenderHint(QPainter.Antialiasing)
             f = QFont("Segoe UI", 8, QFont.Bold)
             p.setFont(f)
-            p.setPen(QPen(QColor(200, 200, 220, 220), 1))
+            p.setPen(QPen(QColor(221, 230, 245, 220), 1))
             for sx, sy, text in labels:
                 p.drawText(int(sx) - 12, int(sy) - 10, 24, 20, 0x0084, text)
             p.end()
@@ -1410,6 +1486,7 @@ class GLWidget(QOpenGLWidget):
             px, py = self._get_sketch_coords(position)
             self.scene.measurement_points.append([px, py, 0.0])
             self.update()
+            self._update_measure_overlay()
             mode = self.scene.measurement_mode
             need = 2 if mode == "distance" else 3
             if len(self.scene.measurement_points) < need:
@@ -1447,6 +1524,7 @@ class GLWidget(QOpenGLWidget):
             self.scene.measurement_mode = None
             self.scene.measurement_points = []
             self.update()
+            self._update_measure_overlay()
         except Exception as e:
             print(f"Errore in _measure_click: {e}")
     
@@ -1497,12 +1575,12 @@ class GLWidget(QOpenGLWidget):
         except Exception as e:
             print(f"Errore in _snap_selection_xy: {e}")
     
-    def _draw_measurement_overlay(self):
+    def _draw_measurement_overlay(self, painter=None):
         try:
             if self.scene.measurement_mode is None or not self.scene.measurement_points:
                 return
             pts = self.scene.measurement_points
-            p = QPainter(self)
+            p = painter if painter is not None else QPainter(self)
             p.setRenderHint(QPainter.Antialiasing)
             scr = []
             for pt in pts:
@@ -1516,10 +1594,27 @@ class GLWidget(QOpenGLWidget):
             if len(scr) >= 2:
                 p.setPen(QPen(QColor(255, 200, 60), 1))
                 for i in range(len(scr) - 1):
-                    p.drawLine(int(scr[i][0]), int(scr[i][1]), int(scr[i + 1][0]), int(scr[i + 1][1]))
-            p.end()
+                    # Coordinate half-pixel: con l'antialiasing attivo la linea
+                    # cade piena dentro i pixel (altrimenti risulta sdoppiata al 50%).
+                    p.drawLine(QPointF(scr[i][0] + 0.5, scr[i][1] + 0.5),
+                               QPointF(scr[i + 1][0] + 0.5, scr[i + 1][1] + 0.5))
+            if painter is None:
+                p.end()
         except Exception as e:
             print(f"Errore in _draw_measurement_overlay: {e}")
+    
+    def _update_measure_overlay(self):
+        """Mostra/nasconde e aggiorna il widget overlay della misura."""
+        ov = getattr(self, "_measure_overlay", None)
+        if ov is None:
+            return
+        if self.scene.measurement_mode is not None and self.scene.measurement_points:
+            ov.setGeometry(0, 0, self.width(), self.height())
+            ov.show()
+            ov.raise_()
+            ov.update()
+        else:
+            ov.hide()
     
     def _select_objects_in_box(self, start, end):
         try:
@@ -1607,9 +1702,12 @@ class GLWidget(QOpenGLWidget):
                 return
             
             if event.modifiers() & Qt.ControlModifier and event.button() == Qt.LeftButton:
-                self.interaction_mode = 'ORBIT'
-                self.click_handled = True
-                return
+                # Ctrl+click su un oggetto = toggle di selezione (multi-selezione,
+                # gestita piu' sotto insieme a Shift); su spazio vuoto = orbita.
+                if self._pick_object(event.pos()) is None:
+                    self.interaction_mode = 'ORBIT'
+                    self.click_handled = True
+                    return
             
             if event.modifiers() & Qt.ControlModifier and event.button() == Qt.MiddleButton:
                 self.interaction_mode = 'ROT_Z'
@@ -1951,6 +2049,7 @@ class GLWidget(QOpenGLWidget):
                     self.scene.measurement_points = []
                     self.window.status_bar.showMessage("Misurazione annullata", 2000)
                     self.update()
+                    self._update_measure_overlay()
                 elif self.sketch_mode:
                     pass
                 elif self.scene.has_selection:
@@ -1965,7 +2064,7 @@ class GLWidget(QOpenGLWidget):
                 self.scene.selected_objects = self.scene.objects.copy()
                 self.window.update_ui()
                 self.update()
-            elif key == Qt.Key_D and mod & Qt.ControlModifier:
+            elif key == Qt.Key_D and mod & Qt.ControlModifier and mod & Qt.ShiftModifier:
                 self.scene.clear_selection()
                 self.window.update_ui()
                 self.update()
@@ -2049,37 +2148,45 @@ class TutorialDialog(QDialog):
         self.setMinimumSize(680, 540)
         self.setStyleSheet(f"""
             QDialog {{
-                background-color: {BACKGROUND_COLOR};
-                color: {TEXT_COLOR};
-                border: 1px solid {BORDER_COLOR};
-                border-radius: 6px;
+                background-color: {BG_PAGE};
+                color: {TEXT_BODY};
+                border: 1px solid {BORDER_SOFT};
+                border-radius: 10px;
             }}
             QTextEdit {{
-                background: #F2F6FB;
-                color: {TEXT_COLOR};
-                border: 1px solid #B0C8DF;
-                border-radius: 3px;
+                background: {BG_CARD};
+                color: {TEXT_BODY};
+                border: 1px solid {BORDER_SOFT};
+                border-radius: 8px;
                 padding: 8px;
-                font-family: 'Segoe UI', sans-serif;
+                font-family: {FONT_BODY};
                 font-size: 13px;
             }}
             QPushButton {{
-                background-color: {BUTTON_COLOR};
-                color: {TEXT_COLOR};
-                border: 1px solid {BORDER_COLOR};
-                border-radius: 3px;
+                background-color: {BG_CARD};
+                color: {TEXT_BODY};
+                border: 1px solid {BORDER_SOFT};
+                border-radius: 8px;
                 padding: 6px 16px;
+                font-family: {FONT_HEAD};
                 font-weight: bold;
             }}
             QPushButton:hover {{
-                background-color: #B8D4EC;
+                background-color: {BG_ELEV};
+                border-color: {AMBER_DARK};
+                color: {AMBER_LIGHT};
+            }}
+            QPushButton:pressed {{
+                background-color: {AMBER};
+                color: {TEXT_ON_AMBER};
             }}
             QPushButton:disabled {{
-                background-color: #A0B8D0;
-                color: #6080A0;
+                background-color: {BG_PAGE};
+                color: {TEXT_MUTED};
+                border-color: {BORDER_SOFT};
             }}
             QCheckBox {{
-                color: {TEXT_COLOR};
+                color: {TEXT_MUTED};
             }}
         """)
 
@@ -2090,13 +2197,13 @@ class TutorialDialog(QDialog):
 
         # Contenuti: lista di (titolo, html) per preservare l'ordine
         self.pages = [
-            ("🚀 Introduzione", f"<h2 style='color:#0C1E36;'>Benvenuto in {APP_NAME} v{VERSION}</h2>"
+            ("🚀 Introduzione", f"<h2 style='color:{AMBER};'>Benvenuto in {APP_NAME} v{VERSION}</h2>"
                                "<p>TriviumCAD è un ambiente integrato per modellazione 3D, progettazione meccanica,<br>"
                                "generazione CAM (percorsi utensile) e invio diretto a stampanti 3D.</p>"
                                "<h3>Convenzione spaziale:</h3>"
-                               "<p>• <b style='color:#CC3333;'>● Rosso = Destra</b> (Asse X, larghezza)<br>"
-                               "• <b style='color:#33CC33;'>● Verde = Dietro</b> (Asse Y, profondità, fronte utente = -Y)<br>"
-                               "• <b style='color:#3333CC;'>● Blu = Sopra</b> (Asse Z, altezza)</p>"
+                               "<p>• <b style='color:#ff6b6b;'>● Rosso = Destra</b> (Asse X, larghezza)<br>"
+                               "• <b style='color:#5cff8a;'>● Verde = Dietro</b> (Asse Y, profondità, fronte utente = -Y)<br>"
+                               "• <b style='color:#7f9dff;'>● Blu = Sopra</b> (Asse Z, altezza)</p>"
                                "<h3>Pannelli:</h3>"
                                "<p>• <b>Sinistro:</b> Forme Primitive, Meccanica (Filettatura/Affetta/Arrotonda), CAM<br>"
                                "• <b>Destro:</b> Testo 3D, Parametri (posizione/rotazione), Analisi<br>"
@@ -2129,7 +2236,7 @@ class TutorialDialog(QDialog):
                                       "• <b>Shift + box select:</b> aggiunge alla selezione<br>"
                                       "• <b>Click vuoto:</b> deseleziona tutto<br>"
                                       "• <b>Tasto DX:</b> menu contestuale (Duplica, Elimina, Raggruppa, Allinea a Z=0)<br>"
-                                      "• <b>Ctrl+A:</b> seleziona tutti &nbsp;•&nbsp; <b>Ctrl+D:</b> deseleziona tutti<br>"
+                                      "• <b>Ctrl+A:</b> seleziona tutti &nbsp;•&nbsp; <b>Ctrl+D:</b> duplica &nbsp;•&nbsp; <b>Ctrl+Shift+D:</b> deseleziona tutti<br>"
                                       "• <b>Del:</b> elimina selezionati</p>"
                                       "<h3>Misurazioni:</h3>"
                                       "<p>• <b>Ctrl+M:</b> misura distanza tra 2 punti (clicca 2 punti sulla scena)<br>"
@@ -2137,14 +2244,14 @@ class TutorialDialog(QDialog):
 
             ("🎨 GIZMO", "<h2>Maniglie di Trasformazione</h2>"
                          "<p>Il GIZMO appare quando selezioni uno o più oggetti.</p>"
-                         "<p><b style='color:#CC3333;'>● Rosso — Asse X:</b> Larghezza (destra/sinistra)<br>"
-                         "<b style='color:#33CC33;'>● Verde — Asse Y:</b> Profondità (davanti = -Y, dietro = +Y)<br>"
-                         "<b style='color:#3333CC;'>● Blu — Asse Z:</b> Altezza (sopra = +Z, sotto = -Z)</p>"
+                         "<p><b style='color:#ff6b6b;'>● Rosso — Asse X:</b> Larghezza (destra/sinistra)<br>"
+                         "<b style='color:#5cff8a;'>● Verde — Asse Y:</b> Profondità (davanti = -Y, dietro = +Y)<br>"
+                         "<b style='color:#7f9dff;'>● Blu — Asse Z:</b> Altezza (sopra = +Z, sotto = -Z)</p>"
                          "<p>• <b>◉ Bianco (centro):</b> Sposta su piano XY (segue il mouse 1:1)<br>"
                          "• <b>⇅ Grigia (verticale):</b> Sposta su Z (trascina su/giù)<br>"
                          "• <b>◆ Gialla (diagonale):</b> Scala uniforme (trascina orizzontalmente)<br>"
                          "• <b>Assi colorati:</b> Trascina per scalare SOLO lungo quell'asse<br>"
-                         "• <b style='color:#FFDD00;'>● Cerchi gialli (goniometro):</b> Appaiono passando il mouse sugli assi<br>"
+                         "• <b style='color:#f7c948;'>● Cerchi gialli (goniometro):</b> Appaiono passando il mouse sugli assi<br>"
                          "&nbsp;&nbsp;• Trascina per ruotare attorno all'asse<br>"
                          "&nbsp;&nbsp;• Tacche ogni 15° (piccole), ogni 45° (grandi con punti)<br>"
                          "• <b>Maniglia evidenziata:</b> Pronta al trascinamento (cambia colore al passaggio del mouse)</p>"
@@ -2152,8 +2259,8 @@ class TutorialDialog(QDialog):
                          "<p>• Trascina per <b>allungare/accorciare l'intera metà della forma</b> dal centro geometrico<br>"
                          "• Deformazione uniforme lungo l'asse: la sezione perpendicolare resta invariata<br>"
                          "• Il peso è massimo (1.0) alla faccia e zero al centro — transizione lineare<br>"
-                         "• Ogni lato ha la sua maniglia: <b style='color:#CC3333;'>■ X+ / X-</b> (rosso), "
-                         "<b style='color:#33CC33;'>■ Y+ / Y-</b> (verde), <b style='color:#3333CC;'>■ Z+ / Z-</b> (blu)<br>"
+                         "• Ogni lato ha la sua maniglia: <b style='color:#ff6b6b;'>■ X+ / X-</b> (rosso), "
+                         "<b style='color:#5cff8a;'>■ Y+ / Y-</b> (verde), <b style='color:#7f9dff;'>■ Z+ / Z-</b> (blu)<br>"
                          "• Ideale per stirare un lato come gomma: un tubo tirato si allunga e resta tondo</p>"),
 
             ("🔧 Manipolazioni", "<h2>1. Spostamento</h2>"
@@ -2236,7 +2343,7 @@ class TutorialDialog(QDialog):
             ("⌨️ Scorciatoie", "<h2>Generali</h2>"
                                "<p>• <b>Ctrl+Z:</b> Annulla &nbsp;|&nbsp; <b>Ctrl+Y:</b> Ripristina<br>"
                                "• <b>Ctrl+X:</b> Taglia &nbsp;|&nbsp; <b>Ctrl+C:</b> Copia &nbsp;|&nbsp; <b>Ctrl+V:</b> Incolla<br>"
-                               "• <b>Del:</b> Elimina &nbsp;|&nbsp; <b>Ctrl+D:</b> Deseleziona &nbsp;|&nbsp; <b>Ctrl+A:</b> Seleziona tutti<br>"
+                                "• <b>Del:</b> Elimina &nbsp;|&nbsp; <b>Ctrl+D:</b> Duplica &nbsp;|&nbsp; <b>Ctrl+Shift+D:</b> Deseleziona &nbsp;|&nbsp; <b>Ctrl+A:</b> Seleziona tutti<br>"
                                "• <b>Esc:</b> Deseleziona tutto / esci da sketch mode<br>"
                                "• <b>Spazio:</b> Allinea selezione a Z=0</p>"
                                "<h2>Vista</h2>"
@@ -2269,9 +2376,9 @@ class TutorialDialog(QDialog):
                                 "• <b>Guscio:</b> lascia la base inferiore piena (ideale per contenitori)<br>"
                                 "• <b>Collare:</b> ideale per flange e distanziali</p>"),
 
-            ("🖨️ Stampa 3D", "<h2>Invio diretto a stampante</h2>"
+            ("🖨️ Invia alla stampante", "<h2>Invio diretto a stampante</h2>"
                               "<p>File › 'Invia alla stampante…' apre la finestra di connessione.</p>"
-                              "<h3>Profili integrati (13):</h3>"
+                              "<h3>Profili integrati (12):</h3>"
                               "<p>• <b>Bambu Lab:</b> X1C, P1S, A1, A1 Mini — MQTT+FTP<br>"
                               "• <b>Anycubic:</b> Kobra 3, Kobra 2, Vyper — FTP, SMB, OctoPrint, Cloud<br>"
                               "• <b>Creality:</b> K1 Max, K1, Ender 3 V3 — HTTP WiFi, FTP, OctoPrint<br>"
@@ -2321,7 +2428,8 @@ class TutorialDialog(QDialog):
         self.back_btn.clicked.connect(self._prev)
 
         self.page_counter = QLabel("1 / {}".format(len(self.pages)))
-        self.page_counter.setStyleSheet(f"color: {TEXT_COLOR}; font-weight: bold; padding: 0 8px;")
+        self.page_counter.setStyleSheet(
+            f"color: {AMBER_DIM}; font-family: {FONT_MONO}; font-weight: bold; padding: 0 8px;")
 
         self.next_btn = QPushButton("Avanti →")
         self.next_btn.clicked.connect(self._next)
@@ -2329,14 +2437,20 @@ class TutorialDialog(QDialog):
         # Menu a tendina per saltare alle pagine
         self.page_combo = QComboBox()
         self.page_combo.setMinimumWidth(180)
-        self.page_combo.setStyleSheet("""
-            QComboBox {
-                background: #F2F6FB; color: #0C1E36;
-                border: 1px solid #B0C8DF; border-radius: 3px;
+        self.page_combo.setStyleSheet(f"""
+            QComboBox {{
+                background: {BG_CARD}; color: {TEXT_BODY};
+                border: 1px solid {BORDER_SOFT}; border-radius: 8px;
                 padding: 4px 8px; font-size: 12px;
-            }
-            QComboBox:hover { background: #E0EDF5; }
-            QComboBox::drop-down { border: none; }
+            }}
+            QComboBox:hover {{ background: {BG_ELEV}; }}
+            QComboBox::drop-down {{ border: none; }}
+            QComboBox QAbstractItemView {{
+                background: {BG_CARD}; color: {TEXT_BODY};
+                selection-background-color: {BG_ELEV};
+                selection-color: {AMBER_LIGHT};
+                border: 1px solid {BORDER_SOFT};
+            }}
         """)
         for title, _ in self.pages:
             clean = title.replace("🚀", "").replace("🟦", "").replace("👁️", "").replace("🎨", "")
@@ -2427,8 +2541,19 @@ class PrinterConnectDialog(QDialog):
         self.setWindowTitle("Connessione Stampante 3D")
         self.setMinimumSize(560, 520)
         self.setStyleSheet(f"""
-            background-color: {BACKGROUND_COLOR}; color: {TEXT_COLOR};
-            border: 1px solid {BORDER_COLOR}; border-radius: 4px;
+            QDialog {{
+                background-color: {BG_PAGE}; color: {TEXT_BODY};
+                border: 1px solid {BORDER_SOFT}; border-radius: 10px;
+            }}
+            QLabel {{ color: {TEXT_BODY}; }}
+            QGroupBox {{
+                border: 1px solid {BORDER_SOFT}; border-radius: 8px;
+                margin-top: 1ex; padding-top: 10px;
+                font-weight: bold; color: {AMBER};
+            }}
+            QGroupBox::title {{
+                subcontrol-origin: margin; left: 7px; padding: 0 3px;
+            }}
         """)
         layout = QVBoxLayout(self)
         layout.setSpacing(6)
@@ -2447,13 +2572,15 @@ class PrinterConnectDialog(QDialog):
         h_proto = QHBoxLayout()
         h_proto.addWidget(QLabel("Protocollo:"))
         self.protocol_combo = QComboBox()
-        self.protocol_combo.currentTextChanged.connect(self._on_protocol_change)
+        self.protocol_combo.currentIndexChanged.connect(
+            lambda _idx: self._on_protocol_change(self.protocol_combo.currentData())
+        )
         h_proto.addWidget(self.protocol_combo, 1)
         layout.addLayout(h_proto)
         
         self.proto_help = QLabel("")
         self.proto_help.setWordWrap(True)
-        self.proto_help.setStyleSheet(f"color: #3060A0; padding: 2px 6px;")
+        self.proto_help.setStyleSheet(f"color: {AMBER_DIM}; padding: 2px 6px;")
         layout.addWidget(self.proto_help)
         
         info = QGroupBox("Specifiche stampante")
@@ -2483,7 +2610,8 @@ class PrinterConnectDialog(QDialog):
         cl.addLayout(h2)
         
         h2b = QHBoxLayout()
-        h2b.addWidget(QLabel("Utente (opz):"))
+        self.user_label = QLabel("Utente (opz):")
+        h2b.addWidget(self.user_label)
         self.user_entry = QLineEdit()
         self.user_entry.setPlaceholderText("(opzionale per FTP/SMB)")
         h2b.addWidget(self.user_entry)
@@ -2524,7 +2652,17 @@ class PrinterConnectDialog(QDialog):
         
         btn_row = QHBoxLayout()
         self.send_btn = QPushButton("Invia alla stampante")
-        self.send_btn.setStyleSheet(f"background-color: #4CAF50; color: white; padding: 8px 20px;")
+        self.send_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {AMBER}; color: {TEXT_ON_AMBER};
+                padding: 8px 20px; border: 2px solid {AMBER_DARK};
+                border-radius: 8px; font-family: {FONT_HEAD}; font-weight: bold;
+            }}
+            QPushButton:hover {{ background-color: {AMBER_LIGHT}; border-color: {AMBER}; }}
+            QPushButton:pressed {{ background-color: {AMBER_DIM}; }}
+            QPushButton:disabled {{ background-color: {BG_CARD}; color: {TEXT_MUTED}; border-color: {BORDER_SOFT}; }}
+        """)
+        self.send_btn.setCursor(Qt.PointingHandCursor)
         self.send_btn.clicked.connect(self._send_to_printer)
         self.export_btn = QPushButton("Solo esporta")
         self.export_btn.clicked.connect(self._export_profile)
@@ -2565,7 +2703,12 @@ class PrinterConnectDialog(QDialog):
         self.proto_help.setText(help_text)
         needs_auth = proto in ("ftp", "mqtt_ftps", "prusalink", "octoprint", "anycubic_cloud")
         self.code_entry.setEnabled(needs_auth or proto == "smb")
-        self.user_entry.setEnabled(proto in ("ftp", "smb"))
+        is_anycubic = proto == "anycubic_cloud"
+        self.user_entry.setEnabled(proto in ("ftp", "smb") or is_anycubic)
+        self.user_label.setText("Email (Anycubic Cloud):" if is_anycubic else "Utente (opz):")
+        self.user_entry.setPlaceholderText(
+            "es. nome@email.com" if is_anycubic else "(opzionale per FTP/SMB)"
+        )
     
     def _send_to_printer(self):
         profile = PRINTER_PROFILES.get(self.profile_combo.currentText())
@@ -2582,7 +2725,11 @@ class PrinterConnectDialog(QDialog):
             return
         
         scene = parent.scene
-        visible = [o for o in scene.objects if scene.layers.get(o.metadata.get("layer", "Default"), {}).get("visible", True)]
+        visible = [
+            o for o in scene.objects
+            if scene.layers.get(o.metadata.get("layer", "Default"), {}).get("visible", True)
+            and o.metadata.get("visible", True) is not False
+        ]
         if not visible:
             self.status.setText("<span style='color:red;'>Nessun oggetto visibile da stampare</span>")
             return
@@ -2797,14 +2944,15 @@ class PrinterConnectDialog(QDialog):
             self.status.setText(f"<span style='color:red;'>Errore Anycubic Cloud: {str(e)}</span>")
     
     def _send_fileonly(self, file_path, profile, ip, layer, infill, supports, brim):
-        out_dir = os.path.expanduser("~/Desktop")
+        out_dir = QStandardPaths.writableLocation(QStandardPaths.DesktopLocation) or os.path.expanduser("~")
         try:
-            import shutil, os
+            import shutil
             out_path = os.path.join(out_dir, os.path.basename(file_path))
             shutil.copy2(file_path, out_path)
         except Exception as e:
             print(f"ERRORE: _send_fileonly fallito: {e}")
-            pass
+            self.status.setText(f"<span style='color:red;'>Errore copia file: {str(e)}</span>")
+            return
         self.status.setText(
             f"<span style='color:green;'>✅ File pronto per {profile['brand']} {profile['model']}</span>"
             f"<br>Layer: {layer}mm | Infill: {infill}% | Supporti: {'Sì' if supports else 'No'}"
@@ -2821,7 +2969,11 @@ class PrinterConnectDialog(QDialog):
         if not parent:
             return
         scene = parent.scene
-        visible = [o for o in scene.objects if scene.layers.get(o.metadata.get("layer", "Default"), {}).get("visible", True)]
+        visible = [
+            o for o in scene.objects
+            if scene.layers.get(o.metadata.get("layer", "Default"), {}).get("visible", True)
+            and o.metadata.get("visible", True) is not False
+        ]
         if not visible:
             return
         
@@ -2869,25 +3021,25 @@ class PropertiesPanel(QWidget):
         
         self.placeholder = QLabel("🖱️ Seleziona un oggetto")
         self.placeholder.setAlignment(Qt.AlignCenter)
-        self.placeholder.setStyleSheet(f"padding:15px;color:#2C4A6E;font-style:italic;font-size:10px;background-color: {BACKGROUND_COLOR};")
+        self.placeholder.setStyleSheet(f"padding:15px;color:{TEXT_MUTED};font-style:italic;font-size:10px;background-color: {BG_PAGE};")
         container_layout.addWidget(self.placeholder)
         container_layout.addStretch()
         
         self.selection_group = QGroupBox("🔍 Selezione")
         self.selection_group.setStyleSheet(f"""
             QGroupBox {{
-                border: 1px solid {BORDER_COLOR};
-                border-radius: 4px;
+                border: 1px solid {BORDER_SOFT};
+                border-radius: 8px;
                 margin-top: 1ex;
                 font-weight: bold;
-                color: {BORDER_COLOR};
-                background-color: {BACKGROUND_COLOR};
+                color: {AMBER};
+                background-color: {BG_CARD};
             }}
             QGroupBox::title {{
                 subcontrol-origin: margin;
                 left: 7px;
                 padding: 0 3px 0 3px;
-                color: {BORDER_COLOR};
+                color: {AMBER};
             }}
         """)
         selection_layout = QFormLayout()
@@ -2906,18 +3058,18 @@ class PropertiesPanel(QWidget):
         self.coordinates_group = QGroupBox("📍 Coordinate & Dimensioni")
         self.coordinates_group.setStyleSheet(f"""
             QGroupBox {{
-                border: 1px solid {BORDER_COLOR};
-                border-radius: 4px;
+                border: 1px solid {BORDER_SOFT};
+                border-radius: 8px;
                 margin-top: 1ex;
                 font-weight: bold;
-                color: {BORDER_COLOR};
-                background-color: {BACKGROUND_COLOR};
+                color: {AMBER};
+                background-color: {BG_CARD};
             }}
             QGroupBox::title {{
                 subcontrol-origin: margin;
                 left: 7px;
                 padding: 0 3px 0 3px;
-                color: {BORDER_COLOR};
+                color: {AMBER};
             }}
         """)
         form_layout = QFormLayout()
@@ -2933,12 +3085,12 @@ class PropertiesPanel(QWidget):
         self.depth_label = QLabel("P:0.00")
         
         for label, style in [
-            (self.x_label, f"color:#0FF;font:11px mono;background-color: {BACKGROUND_COLOR};"),
-            (self.y_label, f"color:#0FF;font:11px mono;background-color: {BACKGROUND_COLOR};"),
-            (self.z_label, f"color:#0FF;font:11px mono;background-color: {BACKGROUND_COLOR};"),
-            (self.width_label, f"color:#FFD700;font:11px mono;background-color: {BACKGROUND_COLOR};"),
-            (self.height_label, f"color:#FFD700;font:11px mono;background-color: {BACKGROUND_COLOR};"),
-            (self.depth_label, f"color:#FFD700;font:11px mono;background-color: {BACKGROUND_COLOR};")
+            (self.x_label, f"color:{GREEN_CRT};font-family:{FONT_MONO};font-size:11px;background-color: {BG_CARD};"),
+            (self.y_label, f"color:{GREEN_CRT};font-family:{FONT_MONO};font-size:11px;background-color: {BG_CARD};"),
+            (self.z_label, f"color:{GREEN_CRT};font-family:{FONT_MONO};font-size:11px;background-color: {BG_CARD};"),
+            (self.width_label, f"color:{AMBER};font-family:{FONT_MONO};font-size:11px;background-color: {BG_CARD};"),
+            (self.height_label, f"color:{AMBER};font-family:{FONT_MONO};font-size:11px;background-color: {BG_CARD};"),
+            (self.depth_label, f"color:{AMBER};font-family:{FONT_MONO};font-size:11px;background-color: {BG_CARD};")
         ]:
             label.setStyleSheet(style)
         
@@ -2952,18 +3104,18 @@ class PropertiesPanel(QWidget):
         self.status_group = QGroupBox("📊 Stato")
         self.status_group.setStyleSheet(f"""
             QGroupBox {{
-                border: 1px solid {BORDER_COLOR};
-                border-radius: 4px;
+                border: 1px solid {BORDER_SOFT};
+                border-radius: 8px;
                 margin-top: 1ex;
                 font-weight: bold;
-                color: {BORDER_COLOR};
-                background-color: {BACKGROUND_COLOR};
+                color: {AMBER};
+                background-color: {BG_CARD};
             }}
             QGroupBox::title {{
                 subcontrol-origin: margin;
                 left: 7px;
                 padding: 0 3px 0 3px;
-                color: {BORDER_COLOR};
+                color: {AMBER};
             }}
         """)
         status_layout = QFormLayout()
@@ -3102,16 +3254,16 @@ def _make_eye_icon(visible=True, size=14):
     cx, cy = size // 2, size // 2
     ew, eh = size - 4, size // 2 - 1
     if visible:
-        p.setPen(QPen(QColor("#2C5F8A"), 1.2))
-        p.setBrush(QColor(255, 255, 255, 220))
+        p.setPen(QPen(QColor(AMBER), 1.2))
+        p.setBrush(QColor(240, 180, 41, 60))
         p.drawEllipse(int(cx - ew/2), int(cy - eh/2), ew, eh)
-        p.setBrush(QColor("#2C5F8A"))
+        p.setBrush(QColor(AMBER))
         p.drawEllipse(int(cx - 2), int(cy - 2), 4, 4)
     else:
-        p.setPen(QPen(QColor("#aaa"), 1.2))
-        p.setBrush(QColor(240, 240, 240, 200))
+        p.setPen(QPen(QColor(TEXT_MUTED), 1.2))
+        p.setBrush(QColor(159, 179, 204, 40))
         p.drawEllipse(int(cx - ew/2), int(cy - eh/2), ew, eh)
-        p.setPen(QPen(QColor("#cc4444"), 1.5))
+        p.setPen(QPen(QColor("#ff6b6b"), 1.5))
         p.drawLine(2, 2, size - 2, size - 2)
     p.end()
     return QIcon(pm)
@@ -3125,17 +3277,17 @@ def _make_lock_icon(locked=True, size=14):
     bx = (size - bw) // 2
     by = size - bh - 2
     if locked:
-        p.setPen(QPen(QColor("#b8960a"), 1.2))
-        p.setBrush(QColor("#e8c840"))
+        p.setPen(QPen(QColor(AMBER_DARK), 1.2))
+        p.setBrush(QColor(AMBER))
         p.drawRoundedRect(bx, by, bw, bh, 2, 2)
-        p.setPen(QPen(QColor("#b8960a"), 1.5))
+        p.setPen(QPen(QColor(AMBER_DARK), 1.5))
         p.setBrush(Qt.NoBrush)
         p.drawArc(bx + 1, by - 3, bw - 2, bw - 2, 180 * 16, 180 * 16)
     else:
-        p.setPen(QPen(QColor("#999"), 1.2))
-        p.setBrush(QColor(200, 200, 200))
+        p.setPen(QPen(QColor("#6b7f99"), 1.2))
+        p.setBrush(QColor(TEXT_MUTED))
         p.drawRoundedRect(bx, by, bw, bh, 2, 2)
-        p.setPen(QPen(QColor("#999"), 1.5))
+        p.setPen(QPen(QColor("#6b7f99"), 1.5))
         p.setBrush(Qt.NoBrush)
         p.drawArc(bx + 1, by - 3, bw - 2, bw - 2, 180 * 16, 160 * 16)
     p.end()
@@ -3182,26 +3334,27 @@ class ConsoleDialog(QDialog):
 
         self.output = QTextEdit()
         self.output.setReadOnly(True)
-        self.output.setStyleSheet("""
-            QTextEdit {
-                background: #1e1e1e; color: #d4d4d4;
-                font-family: 'Consolas', 'Courier New', monospace;
+        self.output.setStyleSheet(f"""
+            QTextEdit {{
+                background: {BG_PAGE}; color: {TEXT_BODY};
+                font-family: {FONT_MONO};
                 font-size: 12px;
-                border: 1px solid #333; border-radius: 3px;
+                border: 1px solid {BORDER_SOFT}; border-radius: 8px;
                 padding: 4px;
-            }
+            }}
         """)
         layout.addWidget(self.output)
 
         self.input = QLineEdit()
-        self.input.setStyleSheet("""
-            QLineEdit {
-                background: #252526; color: #d4d4d4;
-                font-family: 'Consolas', 'Courier New', monospace;
+        self.input.setStyleSheet(f"""
+            QLineEdit {{
+                background: {BG_CARD}; color: {TEXT_BODY};
+                font-family: {FONT_MONO};
                 font-size: 12px;
-                border: 1px solid #333; border-radius: 3px;
+                border: 1px solid {BORDER_SOFT}; border-radius: 8px;
                 padding: 4px 6px;
-            }
+            }}
+            QLineEdit:focus {{ border-color: {AMBER_DARK}; }}
         """)
         self.input.returnPressed.connect(self._execute)
         layout.addWidget(self.input)
@@ -3231,7 +3384,7 @@ class ConsoleDialog(QDialog):
             text = text.replace('\r\n', '\n').replace('\r', '\n').replace('\n', '<br>')
             cur = self.output.textCursor()
             cur.movePosition(QTextCursor.End)
-            cur.insertHtml(f'<span style="color:#d4d4d4;">{text}</span>')
+            cur.insertHtml(f'<span style="color:{TEXT_BODY};">{text}</span>')
             self.output.setTextCursor(cur)
             scroll = self.output.verticalScrollBar()
             scroll.setValue(scroll.maximum())
@@ -3244,17 +3397,15 @@ class ConsoleDialog(QDialog):
 
     def _print_banner(self):
         self.output.append(
-            '<span style="color:#569cd6;">╔══════════════════════════════════════╗</span><br>'
-            '<span style="color:#569cd6;">║  TriviumCAD Python Console              ║</span><br>'
-            '<span style="color:#569cd6;">╚══════════════════════════════════════╝</span><br>'
-            '<span style="color:#888;">Digita codice Python e premi Invio.</span><br>'
-            '<span style="color:#888;">↑↓ cronologia. Variabili disponibili:</span><br>'
-            '<span style="color:#6a9955;">  scene</span><span style="color:#888;"> — scena corrente</span><br>'
-            '<span style="color:#6a9955;">  gl</span><span style="color:#888;"> — widget 3D</span><br>'
-            '<span style="color:#6a9955;">  selected</span><span style="color:#888;"> — oggetti selezionati</span><br>'
-            '<span style="color:#6a9955;">  obj</span><span style="color:#888;"> — primo selezionato</span><br>'
-            '<span style="color:#6a9955;">  np, trimesh</span><span style="color:#888;"> — librerie</span><br>'
-            '<span style="color:#888;">Tutto stdout/stderr dell\'app appare qui.</span><br>'
+            f'<span style="color:{AMBER};">TriviumCAD Python Console</span><br>'
+            f'<span style="color:{TEXT_MUTED};">Digita codice Python e premi Invio.</span><br>'
+            f'<span style="color:{TEXT_MUTED};">↑↓ cronologia. Variabili disponibili:</span><br>'
+            f'<span style="color:{GREEN_CRT};">  scene</span><span style="color:{TEXT_MUTED};"> — scena corrente</span><br>'
+            f'<span style="color:{GREEN_CRT};">  gl</span><span style="color:{TEXT_MUTED};"> — widget 3D</span><br>'
+            f'<span style="color:{GREEN_CRT};">  selected</span><span style="color:{TEXT_MUTED};"> — oggetti selezionati</span><br>'
+            f'<span style="color:{GREEN_CRT};">  obj</span><span style="color:{TEXT_MUTED};"> — primo selezionato</span><br>'
+            f'<span style="color:{GREEN_CRT};">  np, trimesh</span><span style="color:{TEXT_MUTED};"> — librerie</span><br>'
+            f'<span style="color:{TEXT_MUTED};">Tutto stdout/stderr dell\'app appare qui.</span><br>'
         )
 
     def keyPressEvent(self, event):
@@ -3278,7 +3429,7 @@ class ConsoleDialog(QDialog):
         self.history.append(code)
         self.history_idx = len(self.history)
         self.input.clear()
-        self.output.append(f'<span style="color:#569cd6;">&gt;&gt;&gt;</span> {code}')
+        self.output.append(f'<span style="color:{AMBER};">&gt;&gt;&gt;</span> {code}')
         import io, contextlib, traceback
         env = {
             "scene": self.scene,
@@ -3294,9 +3445,9 @@ class ConsoleDialog(QDialog):
                 result = eval(code, env)
             out = buf.getvalue()
             if out:
-                self.output.append(f'<span style="color:#d4d4d4;">{out}</span>')
+                self.output.append(f'<span style="color:{TEXT_BODY};">{out}</span>')
             if result is not None:
-                self.output.append(f'<span style="color:#ce9178;">{result!r}</span>')
+                self.output.append(f'<span style="color:{AMBER_LIGHT};">{result!r}</span>')
         except SyntaxError:
             buf = io.StringIO()
             try:
@@ -3304,11 +3455,11 @@ class ConsoleDialog(QDialog):
                     exec(code, env)
                 out = buf.getvalue()
                 if out:
-                    self.output.append(f'<span style="color:#d4d4d4;">{out}</span>')
+                    self.output.append(f'<span style="color:{TEXT_BODY};">{out}</span>')
             except Exception as e:
-                self.output.append(f'<span style="color:#f44747;">{traceback.format_exc()}</span>')
+                self.output.append(f'<span style="color:#ff6b6b;">{traceback.format_exc()}</span>')
         except Exception as e:
-            self.output.append(f'<span style="color:#f44747;">{traceback.format_exc()}</span>')
+            self.output.append(f'<span style="color:#ff6b6b;">{traceback.format_exc()}</span>')
         self.gl_widget.update()
         scroll = self.output.verticalScrollBar()
         scroll.setValue(scroll.maximum())
@@ -3363,6 +3514,7 @@ class CADWindow(QMainWindow):
             import traceback
             traceback.print_exc()
             print(f"[TriviumCAD] ERRORE in _run_blocking: {e}")
+            _QMsgBox.warning(self, "Errore", f"Operazione fallita:\n{e}")
     
     def _undo_action(self):
         if self.scene.undo():
@@ -3381,7 +3533,7 @@ class CADWindow(QMainWindow):
         menu_bar = self.menuBar()
         
         file_menu = menu_bar.addMenu("File")
-        file_menu.addAction("Nuovo", self._new)
+        file_menu.addAction("Nuovo", self._new).setShortcut(QKeySequence.New)
         file_menu.addAction("Apri", self._open)
         file_menu.addAction("Salva", self._save)
         file_menu.addSeparator()
@@ -3394,6 +3546,10 @@ class CADWindow(QMainWindow):
         edit_menu = menu_bar.addMenu("Modifica")
         edit_menu.addAction("Annulla", self._undo_action).setShortcut("Ctrl+Z")
         edit_menu.addAction("Ripristina", self._redo_action).setShortcut("Ctrl+Y")
+        edit_menu.addSeparator()
+        edit_menu.addAction("Taglia", self.gl_widget._cut_selected).setShortcut("Ctrl+X")
+        edit_menu.addAction("Copia", self.gl_widget._copy_selected).setShortcut("Ctrl+C")
+        edit_menu.addAction("Incolla", self.gl_widget._paste_clipboard).setShortcut("Ctrl+V")
         edit_menu.addSeparator()
         edit_menu.addAction("Duplica", self.scene.duplicate).setShortcut("Ctrl+D")
         edit_menu.addAction("Elimina", self.scene.delete).setShortcut("Del")
@@ -3448,64 +3604,72 @@ class CADWindow(QMainWindow):
         tb_layout.setContentsMargins(0, 0, 0, 0)
         tb_layout.setSpacing(2)
 
+        # Stile UNICO per TUTTI i pulsanti della toolbar (incarico N47 03/10/2026):
+        # sfondo blu BG_CARD, bordo ambra 2px, testo bianco, emoji davanti al testo.
+        # Stati checked/attivi: base blu mantenuta, bordo ambra piu' luminoso (glow).
+        btn_qss = f"""
+            QPushButton {{
+                color: #ffffff;
+                font-family: {FONT_HEAD};
+                font-size: 12px;
+                font-weight: bold;
+                padding: 5px 10px;
+                border: 2px solid {AMBER};
+                border-radius: 12px;
+                background: {BG_CARD};
+            }}
+            QPushButton:hover {{
+                background: {BG_ELEV};
+            }}
+            QPushButton:pressed {{
+                background: {BUTTON_PRESSED};
+            }}
+            QPushButton:checked {{
+                background: {BG_ELEV};
+                border-color: {AMBER_LIGHT};
+            }}
+            QPushButton:checked:hover {{
+                background: {BUTTON_PRESSED};
+                border-color: {AMBER_LIGHT};
+            }}
+            QPushButton:checked:pressed {{
+                background: {BUTTON_PRESSED};
+                border-color: {AMBER_LIGHT};
+            }}
+        """
+
         def sep():
             s = QFrame()
             s.setFrameShape(QFrame.VLine)
             s.setFrameShadow(QFrame.Sunken)
             return s
 
-        def mkbtn(text, cb, icon_color=(100,150,200)):
-            b = QPushButton(_make_icon(text.split()[-1][:2], icon_color, 20), text)
-            b.setIconSize(QSize(20, 20))
+        def mkbtn(text, cb, icon=None):
+            b = QPushButton(text)
             b.setFlat(True)
-            b.setStyleSheet("""
-                QPushButton {
-                    color: #0C1E36;
-                    font-size: 12px;
-                    font-weight: bold;
-                    padding: 5px 10px;
-                    border: 2px solid #2C5F8A;
-                    border-radius: 14px;
-                    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                        stop:0 rgba(200,220,240,0.5), stop:1 rgba(200,220,240,0.2));
-                }
-                QPushButton:hover {
-                    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                        stop:0 rgba(207,250,254,0.6), stop:1 rgba(207,250,254,0.3));
-                    border-color: #3A7FAA;
-                }
-            """)
+            b.setStyleSheet(btn_qss)
             b.setCursor(Qt.PointingHandCursor)
+            if icon is not None:
+                b.setIcon(icon)
+                b.setIconSize(QSize(22, 22))
             b.clicked.connect(cb)
             return b
 
         tb_layout.addStretch()
-        tb_layout.addWidget(mkbtn("Da2 a 3D", self._import_2d_to_3d, (180,100,80)))
+        tb_layout.addWidget(mkbtn("🧊 Da2 a 3D", self._import_2d_to_3d))
+        penaxe_icon = None
+        penaxe_path = Path(__file__).resolve().parent / "Immagini" / "2penaxe_64.png"
+        if penaxe_path.exists():
+            penaxe_icon = QIcon(str(penaxe_path))
+        tb_layout.addWidget(mkbtn("2PenAxE", self._open_2penaxe, icon=penaxe_icon))
         tb_layout.addWidget(sep())
-        tb_layout.addWidget(mkbtn("Nuovo", self._new, (100,180,100)))
-        tb_layout.addWidget(mkbtn("Apri", self._open, (120,140,200)))
-        tb_layout.addWidget(mkbtn("Salva", self._save, (140,120,80)))
+        tb_layout.addWidget(mkbtn("🆕 Nuovo", self._new))
+        tb_layout.addWidget(mkbtn("📂 Apri", self._open))
+        tb_layout.addWidget(mkbtn("💾 Salva", self._save))
         tb_layout.addWidget(sep())
-        bool_btn = QPushButton(_make_icon("B", (80,120,160), 20), "Booleane")
-        bool_btn.setIconSize(QSize(20, 20))
+        bool_btn = QPushButton("🅱 Booleane")
         bool_btn.setFlat(True)
-        bool_btn.setStyleSheet("""
-            QPushButton {
-                color: #0C1E36;
-                font-size: 12px;
-                font-weight: bold;
-                padding: 5px 10px;
-                border: 2px solid #2C5F8A;
-                border-radius: 14px;
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 rgba(200,220,240,0.5), stop:1 rgba(200,220,240,0.2));
-            }
-            QPushButton:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 rgba(207,250,254,0.6), stop:1 rgba(207,250,254,0.3));
-                border-color: #3A7FAA;
-            }
-        """)
+        bool_btn.setStyleSheet(btn_qss)
         bool_btn.setCursor(Qt.PointingHandCursor)
         bool_menu = QMenu(self)
         bool_menu.addAction("Unione", lambda: self._run_boolean("unione"))
@@ -3514,67 +3678,35 @@ class CADWindow(QMainWindow):
         bool_btn.setMenu(bool_menu)
         tb_layout.addWidget(bool_btn)
         tb_layout.addWidget(sep())
-        tb_layout.addWidget(mkbtn("Guscio", self._shell, (160,140,80)))
+        tb_layout.addWidget(mkbtn("🛡️ Guscio", self._shell))
         tb_layout.addWidget(sep())
-        snap_btn = mkbtn("Snap", self._toggle_snap, (100,160,180))
+        snap_btn = mkbtn("🎯 Snap", self._toggle_snap)
         snap_btn.setCheckable(True)
         snap_btn.setChecked(self.scene.snap_grid)
         tb_layout.addWidget(snap_btn)
-        magnet_btn = mkbtn("Magneti", self._toggle_magnetic, (140,100,160))
+        self._snap_btn = snap_btn
+        magnet_btn = mkbtn("🧲 Magneti", self._toggle_magnetic)
         magnet_btn.setCheckable(True)
         magnet_btn.setChecked(self.scene.magnetic_snap)
         tb_layout.addWidget(magnet_btn)
+        self._magnet_btn = magnet_btn
         tb_layout.addStretch()
         tb_layout.addSpacing(8)
         
-        donate_btn = QPushButton("❤️  Sostieni")
+        donate_btn = QPushButton("💖 Sostieni")
         donate_btn.setFlat(True)
         donate_btn.setMinimumHeight(34)
-        donate_btn.setStyleSheet("""
-            QPushButton {
-                color: #0C1E36;
-                font-size: 12px;
-                font-weight: bold;
-                padding: 5px 10px;
-                border: 2px solid #f5a623;
-                border-radius: 14px;
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 rgba(245,166,35,0.12), stop:1 rgba(245,166,35,0.04));
-            }
-            QPushButton:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 rgba(245,166,35,0.25), stop:1 rgba(245,166,35,0.12));
-                border-color: #ffc107;
-                color: #0C1E36;
-            }
-        """)
+        donate_btn.setStyleSheet(btn_qss)
         donate_btn.setCursor(Qt.PointingHandCursor)
-        donate_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://www.paypal.com/donate/?hosted_button_id=BC8Q8DEFUE9LJ")))
+        donate_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://www.paypal.com/donate/?hosted_button_id=23BVE4WB939KA")))
         tb_layout.addWidget(donate_btn)
         
         tb_layout.addSpacing(6)
         
-        sito_btn = QPushButton("Sito")
+        sito_btn = QPushButton("🌐 Sito")
         sito_btn.setFlat(True)
         sito_btn.setMinimumHeight(34)
-        sito_btn.setStyleSheet("""
-            QPushButton {
-                color: #0C1E36;
-                font-size: 12px;
-                font-weight: bold;
-                padding: 5px 10px;
-                border: 2px solid #5a9fd4;
-                border-radius: 14px;
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 rgba(90,159,212,0.12), stop:1 rgba(90,159,212,0.04));
-            }
-            QPushButton:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 rgba(90,159,212,0.25), stop:1 rgba(90,159,212,0.12));
-                border-color: #7eb8e0;
-                color: #0C1E36;
-            }
-        """)
+        sito_btn.setStyleSheet(btn_qss)
         sito_btn.setCursor(Qt.PointingHandCursor)
         sito_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("https://n47lab.altervista.org")))
         tb_layout.addWidget(sito_btn)
@@ -3583,22 +3715,130 @@ class CADWindow(QMainWindow):
         toolbar.addWidget(tb_container)
     
     # --- LAYOUT ---
+    def _make_panel_edge_button(self, arrow: str, tooltip: str, callback, height: int = 56) -> QPushButton:
+        """Pulsante verticale (freccia) per collassare/riaprire un pannello laterale.
+
+        Stile da precetto (STANDARD_VISIVO): fondo ambra #f0b429, testo/freccia
+        #101014, hover #f7c948, bordo #8a6118. Largo 28 px e frecce a 16 px per
+        una visibilita' netta sullo sfondo scuro. `height=26` per la barra di
+        chiusura sul pannello, `height=56` per la linguetta che resta sul bordo.
+        """
+        btn = QPushButton(arrow)
+        btn.setToolTip(tooltip)
+        btn.setFixedSize(28, height)
+        btn.setCursor(Qt.PointingHandCursor)
+        btn.setFocusPolicy(Qt.NoFocus)
+        btn.setStyleSheet(f"""
+            QPushButton {{
+                color: {TEXT_ON_AMBER};
+                font-family: {FONT_HEAD};
+                font-size: 16px;
+                font-weight: bold;
+                border: 2px solid {AMBER_DARK};
+                border-radius: 8px;
+                background: {AMBER};
+                padding: 0px;
+            }}
+            QPushButton:hover {{
+                background: {AMBER_LIGHT};
+                border-color: {AMBER};
+            }}
+            QPushButton:pressed {{
+                background-color: {AMBER_DIM};
+            }}
+        """)
+        btn.clicked.connect(callback)
+        return btn
+
+    def _toggle_left_panel(self):
+        """Collassa/espande il pannello sinistro: da chiuso resta la linguetta sul bordo."""
+        if self.left_body.isHidden():
+            self.left_body.show()
+            self.left_tab.hide()
+            self.left_container.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+        else:
+            self.left_body.hide()
+            self.left_tab.show()
+            self.left_container.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+        self.gl_widget.update()
+
+    def _toggle_right_panel(self):
+        """Collassa/espande il pannello destro: l'Outliner (dock separato) resta visibile."""
+        if self.right_body.isHidden():
+            self.right_body.show()
+            self.right_tab.hide()
+            self.right_container.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+        else:
+            self.right_body.hide()
+            self.right_tab.show()
+            self.right_container.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+        self.gl_widget.update()
+
     def _setup_layout(self):
         main_widget = QWidget()
+        main_widget.setObjectName("centralWidget")
         main_layout = QHBoxLayout(main_widget)
         main_layout.setContentsMargins(0, 0, 0, 0)
-        
+
+        # Pannello sinistro: body (scrollabile) + linguetta che resta sul bordo
+        # sinistro quando il pannello è chiuso.
+        self.left_container = QWidget()
+        left_box = QHBoxLayout(self.left_container)
+        left_box.setContentsMargins(0, 0, 0, 0)
+        left_box.setSpacing(0)
+        self.left_body = QWidget()
+        left_body_layout = QVBoxLayout(self.left_body)
+        left_body_layout.setContentsMargins(0, 0, 0, 0)
+        left_body_layout.setSpacing(0)
+        left_top = QHBoxLayout()
+        left_top.setContentsMargins(2, 2, 2, 0)
+        left_top.addStretch(1)
+        self.left_collapse_btn = self._make_panel_edge_button(
+            "◀", "Chiudi pannello sinistro", self._toggle_left_panel, height=26)
+        left_top.addWidget(self.left_collapse_btn)
+        left_body_layout.addLayout(left_top)
         left_panel = self._create_left_panel()
         left_panel.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
-        main_layout.addWidget(left_panel, 1)
-        
+        left_body_layout.addWidget(left_panel, 1)
+        left_box.addWidget(self.left_body, 1)
+        self.left_tab = self._make_panel_edge_button(
+            "▶", "Apri pannello sinistro", self._toggle_left_panel)
+        self.left_tab.hide()
+        left_box.addWidget(self.left_tab)
+        self.left_container.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+        main_layout.addWidget(self.left_container, 1)
+
         self.gl_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         main_layout.addWidget(self.gl_widget, 5)
-        
+
+        # Pannello destro: linguetta sul bordo destro + body (Testo 3D / Parametri /
+        # Analisi). L'Outliner è un dock separato e resta sempre visibile.
+        self.right_container = QWidget()
+        right_box = QHBoxLayout(self.right_container)
+        right_box.setContentsMargins(0, 0, 0, 0)
+        right_box.setSpacing(0)
+        self.right_tab = self._make_panel_edge_button(
+            "◀", "Apri pannello destro", self._toggle_right_panel)
+        self.right_tab.hide()
+        right_box.addWidget(self.right_tab)
+        self.right_body = QWidget()
+        right_body_layout = QVBoxLayout(self.right_body)
+        right_body_layout.setContentsMargins(0, 0, 0, 0)
+        right_body_layout.setSpacing(0)
+        right_top = QHBoxLayout()
+        right_top.setContentsMargins(2, 2, 2, 0)
+        self.right_collapse_btn = self._make_panel_edge_button(
+            "▶", "Chiudi pannello destro", self._toggle_right_panel, height=26)
+        right_top.addWidget(self.right_collapse_btn)
+        right_top.addStretch(1)
+        right_body_layout.addLayout(right_top)
         self.right_panel = self._create_right_panel()
         self.right_panel.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
-        main_layout.addWidget(self.right_panel, 1)
-        
+        right_body_layout.addWidget(self.right_panel, 1)
+        right_box.addWidget(self.right_body, 1)
+        self.right_container.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+        main_layout.addWidget(self.right_container, 1)
+
         self.setCentralWidget(main_widget)
     
     def _create_left_panel(self) -> QWidget:
@@ -3744,7 +3984,15 @@ class CADWindow(QMainWindow):
         cam_layout.addWidget(QPushButton("Genera Toolpath", clicked=self._generate_toolpath))
         layout.addWidget(cam_group)
         layout.addStretch(1)
-        return panel
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        scroll.setWidget(panel)
+        # Il layout HBox usa la sizeHint della scroll area: senza minimo esplicito
+        # il pannello si restringe (e appare la scrollbar orizzontale). Il +24
+        # lascia spazio alla scrollbar verticale senza clippare il contenuto.
+        scroll.setMinimumWidth(panel.sizeHint().width() + 24)
+        return scroll
 
     # --- PANNELLO DESTRO ---
     def _create_right_panel(self) -> QWidget:
@@ -3758,6 +4006,9 @@ class CADWindow(QMainWindow):
         text_layout.setSpacing(2)
         self.text_entry = QPlainTextEdit()
         self.text_entry.setPlaceholderText("Inserisci testo...")
+        _pal = self.text_entry.palette()
+        _pal.setColor(QPalette.PlaceholderText, QColor(TEXT_MUTED))
+        self.text_entry.setPalette(_pal)
         self.text_entry.setMaximumHeight(50)
         text_layout.addWidget(self.text_entry)
         fr = QHBoxLayout()
@@ -3871,6 +4122,7 @@ class CADWindow(QMainWindow):
             t_bounds = text_mesh.bounds
             t_size = t_bounds[1] - t_bounds[0]
             face_size = bounds[1] - bounds[0]
+            scale = 1.0
             if t_size[0] > 0 and t_size[2] > 0:
                 scale = min(face_size[0] / t_size[0], face_size[2] / t_size[2]) * 0.7
                 text_mesh.apply_scale([scale, 1.0, scale])
@@ -3880,7 +4132,9 @@ class CADWindow(QMainWindow):
             if mv is None or not np.all(np.isfinite(mv)):
                 QMessageBox.warning(self, "Attenzione", "Nessuna vista camera disponibile. Ruota la vista e riprova.")
                 return
-            cam_pos = np.linalg.inv(mv)[:3, 3]
+            # PyOpenGL restituisce la trasposta della modelview: la traslazione utile
+            # e' in mv[3,:3] (verificato empiricamente), quindi cam_pos = -R * t.
+            cam_pos = -mv[:3, :3] @ mv[3, :3]
             d = shape_center - cam_pos
             nd = np.linalg.norm(d)
             if nd < 1e-8:
@@ -3924,6 +4178,21 @@ class CADWindow(QMainWindow):
             text_mesh.merge_vertices()
             if not text_mesh.is_watertight:
                 text_mesh = _ensure_volume(text_mesh)
+            if not text_mesh.is_volume:
+                # Fallback rigido orientato: la proiezione per-vertice non ha
+                # prodotto un volume valido (vertici senza hit quando il testo
+                # e' compenetrato o oltre i bordi della faccia). Ruota il testo
+                # per allineare lo spessore (Y) alla normale fn e lo appoggia
+                # alla superficie, senza deformarlo: mesh sempre watertight.
+                text_mesh = txt_obj.copy()
+                text_mesh.apply_scale([scale, 1.0, scale])
+                T = trimesh.geometry.align_vectors([0.0, 1.0, 0.0], fn)
+                text_mesh.apply_transform(T)
+                text_mesh.vertices = text_mesh.vertices - text_mesh.centroid + anchor
+                ext = np.einsum('ij,j->i', text_mesh.vertices - anchor, fn)
+                thickness = float(ext.max() - ext.min())
+                text_mesh.vertices = text_mesh.vertices + fn * (thickness / 2.0 - float(ext.min()) + 0.05)
+                text_mesh.fix_normals()
             text_mesh.metadata = txt_obj.metadata.copy()
             text_mesh.metadata["name"] = f"{txt_obj.metadata.get('name', 'Testo')}_adattato"
             self.scene.start_operation()
@@ -4089,8 +4358,10 @@ class CADWindow(QMainWindow):
         return mesh
 
     def _simplify_contour(self, contour, max_pts=400):
-        step = max(1, len(contour) // max_pts)
-        return contour[::step]
+        if len(contour) <= max_pts:
+            return contour
+        idx = np.linspace(0, len(contour) - 1, max_pts).astype(int)
+        return contour[idx]
 
     def _import_image_to_3d(self, path: str) -> trimesh.Trimesh:
         from PIL import Image
@@ -4199,6 +4470,20 @@ class CADWindow(QMainWindow):
                 self.status_bar.showMessage(f"Importato: {Path(path).name}", 3000)
         except Exception as e:
             QMessageBox.critical(self, "Errore", f"Importazione 2D fallita: {str(e)}")
+
+    # --- 2PENAXE (SKETCH 2D MULTI-PIANO) ---
+    def _open_2penaxe(self):
+        """Apre la finestra modale 2PenAxE (sketch 2D multi-piano)."""
+        dlg = SketchDialog(self, self.scene, on_change=self._apply_sketch_2d)
+        dlg.exec_()
+        n = len(getattr(self.scene, "sketch_2d_entities", []) or [])
+        self.status_bar.showMessage(f"2PenAxE: sketch con {n} entità", 3000)
+
+    def _apply_sketch_2d(self, entities, state):
+        """Live update: copia entità/stato nella scena e ridisegna la vista 3D."""
+        self.scene.sketch_2d_entities = copy.deepcopy(entities)
+        self.scene.sketch_2d_state = copy.deepcopy(state)
+        self.gl_widget.update()
 
     # --- ANALISI MESH ---
     def _analyze(self, mode: str):
@@ -4420,6 +4705,7 @@ class CADWindow(QMainWindow):
         self.scene.start_operation()
         try:
             msgs = []
+            errori = []
             for obj in self.scene.selected_objects:
                 before_v = len(obj.vertices)
                 before_w = bool(obj.is_watertight) if hasattr(obj, "is_watertight") else False
@@ -4432,7 +4718,8 @@ class CADWindow(QMainWindow):
                     trimesh.repair.fix_winding(obj)
                     trimesh.repair.fix_normals(obj)
                 except Exception as e:
-                    self.status_bar.showMessage(f"Riparazione fallita: {e}", 3000)
+                    print(f"[TriviumCAD] Riparazione fallita per {name}: {e}")
+                    errori.append(f"Riparazione fallita: {e}")
                     continue
                 after_v = len(obj.vertices)
                 after_w = bool(obj.is_watertight) if hasattr(obj, "is_watertight") else False
@@ -4443,12 +4730,15 @@ class CADWindow(QMainWindow):
             self.scene.end_operation()
             self.gl_widget._invalidate_all_vbos()
             self._refresh_view()
-            if not msgs:
-                self.status_bar.showMessage("Nessun oggetto riparato", 3000)
+            if msgs:
+                print(f"[TriviumCAD] Ripara: {'; '.join(msgs)}")
+            if errori:
+                # L'errore ha priorita': NON deve essere sovrascritto da "Nessun oggetto riparato".
+                self.status_bar.showMessage("; ".join(errori), 6000)
+            elif msgs:
+                self.status_bar.showMessage(f"Ripara: {'; '.join(msgs)}", 6000)
             else:
-                msg = "; ".join(msgs)
-                print(f"[TriviumCAD] Ripara: {msg}")
-                self.status_bar.showMessage(f"Ripara: {msg}", 6000)
+                self.status_bar.showMessage("Nessun oggetto riparato", 3000)
         except Exception as e:
             self.scene.cancel_operation()
             self.status_bar.showMessage(f"Errore riparazione: {e}", 3000)
@@ -4491,6 +4781,12 @@ class CADWindow(QMainWindow):
                 return
             self.scene.start_operation()
             idx = self.scene.objects.index(obj)
+            # Preserva i metadata dell'oggetto originale (come nel ramo Interna):
+            # nome, colore, layer, visible, locked, shape_type; elimina le cache GL non piu' valide.
+            thread_mesh.metadata.update(obj.metadata.copy())
+            for key in ["_gl_verts", "_gl_normals", "_gl_vbo_verts", "_gl_vbo_normals"]:
+                thread_mesh.metadata.pop(key, None)
+            thread_mesh.metadata["name"] = f"{obj.metadata.get('name', 'Object')}_filettato"
             self.scene.objects[idx] = thread_mesh
             self.scene.selected_objects = [thread_mesh]
             self.scene._needs_spatial_rebuild = True
@@ -4523,6 +4819,12 @@ class CADWindow(QMainWindow):
                 return
             self.scene.start_operation()
             idx = self.scene.objects.index(obj)
+            # Preserva i metadata dell'oggetto originale (come nel ramo Esterna):
+            # nome, colore, layer, shape_type; elimina le cache GL non piu' valide.
+            result_mesh.metadata.update(obj.metadata.copy())
+            for key in ["_gl_verts", "_gl_normals", "_gl_vbo_verts", "_gl_vbo_normals"]:
+                result_mesh.metadata.pop(key, None)
+            result_mesh.metadata["name"] = f"{obj.metadata.get('name', 'Object')}_filettato"
             self.scene.objects[idx] = result_mesh
             self.scene.selected_objects = [result_mesh]
             self.scene._needs_spatial_rebuild = True
@@ -4536,13 +4838,24 @@ class CADWindow(QMainWindow):
     
     # --- FILE OPERATIONS ---
     def _new(self):
+        if self.scene.objects:
+            box = QMessageBox(self)
+            box.setWindowTitle("Nuova scena")
+            box.setText("Ci sono oggetti non salvati nella scena corrente. Creare una nuova scena comunque?")
+            btn_annulla = box.addButton("Annulla", QMessageBox.RejectRole)
+            btn_crea = box.addButton("Crea", QMessageBox.AcceptRole)
+            box.setDefaultButton(btn_annulla)
+            box.exec_()
+            if box.clickedButton() is not btn_crea:
+                return
+        self.gl_widget._invalidate_all_vbos()
         self.scene = Scene()
         self.scene._callback_notify = self._show_notify
         self.gl_widget.scene = self.scene
         self.gl_widget.update()
         self.update_ui()
         print("[TriviumCAD] Nuova scena creata")
-        self.statusBar().showMessage("Nuova scena creata")
+        self._show_notify("Nuova scena creata")
     
     def _open(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -4553,6 +4866,13 @@ class CADWindow(QMainWindow):
         ext = Path(path).suffix.lower()
         if ext == ".n47":
             self._load_n47(path)
+            return
+        if ext in (".svg", ".dxf", ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tiff", ".webp"):
+            QMessageBox.information(
+                self, "Importa",
+                "I file 2D/immagine (SVG, DXF, PNG, JPG, ...) si importano con il pulsante "
+                "\"Da 2D a 3D\" nella barra degli strumenti."
+            )
             return
         try:
             mesh = trimesh.load(path, force='mesh')
@@ -4601,6 +4921,9 @@ class CADWindow(QMainWindow):
                 self.scene.magnetic_snap = scene_state.get("magnetic_snap", True)
                 self.scene.scale_mode = scene_state.get("scale_mode", "Disattivato")
                 self.scene.layers = scene_state.get("layers", {"Default": {"visible": True, "locked": False, "color": [0.6, 0.75, 0.9, 1.0]}})
+                sketch_2d = scene_state.get("sketch_2d") or {}
+                self.scene.sketch_2d_entities = sketch_2d.get("entities", [])
+                self.scene.sketch_2d_state = sketch_2d.get("state", {})
                 self.scene.objects = []
                 self.scene.selected_objects = []
                 self.scene.undo_stack = []
@@ -4645,6 +4968,10 @@ class CADWindow(QMainWindow):
                 "magnetic_snap": self.scene.magnetic_snap,
                 "scale_mode": self.scene.scale_mode,
                 "layers": self.scene.layers,
+                "sketch_2d": {
+                    "entities": self.scene.sketch_2d_entities,
+                    "state": self.scene.sketch_2d_state,
+                },
             }
             obj_list = []
             for i, obj in enumerate(self.scene.objects):
@@ -4693,6 +5020,7 @@ class CADWindow(QMainWindow):
                 visible_objects = [
                     obj for obj in self.scene.objects 
                     if self.scene.layers.get(obj.metadata.get("layer", "Default"), {}).get("visible", True)
+                    and obj.metadata.get("visible", True) is not False
                 ]
                 
                 if not visible_objects:
@@ -4710,11 +5038,22 @@ class CADWindow(QMainWindow):
         dlg.exec_()
     
     # --- SNAP/GRID ---
+    def _sync_toggle_controls(self, action, button, state: bool):
+        """Allinea il checked di voce menu e pulsante toolbar senza rientranze di segnale."""
+        for ctrl in (action, button):
+            if ctrl is not None and ctrl.isChecked() != state:
+                ctrl.blockSignals(True)
+                ctrl.setChecked(state)
+                ctrl.blockSignals(False)
+
     def _toggle_snap(self, checked=None):
         if isinstance(checked, bool):
             self.scene.snap_grid = checked
         else:
             self.scene.snap_grid = not self.scene.snap_grid
+        self._sync_toggle_controls(getattr(self, "_snap_act", None),
+                                   getattr(self, "_snap_btn", None),
+                                   self.scene.snap_grid)
         self.status_bar.showMessage(f"Snap griglia: {'ON' if self.scene.snap_grid else 'OFF'}", 2000)
 
     def _toggle_magnetic(self, checked=None):
@@ -4722,6 +5061,9 @@ class CADWindow(QMainWindow):
             self.scene.magnetic_snap = checked
         else:
             self.scene.magnetic_snap = not self.scene.magnetic_snap
+        self._sync_toggle_controls(getattr(self, "_magnet_act", None),
+                                   getattr(self, "_magnet_btn", None),
+                                   self.scene.magnetic_snap)
         self.status_bar.showMessage(f"Magneti: {'ON' if self.scene.magnetic_snap else 'OFF'}", 2000)
 
     def _set_grid_scale(self):
@@ -4808,7 +5150,9 @@ class CADWindow(QMainWindow):
                 "name": f"Testo_{text[:10]}",
                 "shape_type": "text",
                 "params": {},
-                "assembly": None
+                "assembly": None,
+                "visible": True,
+                "locked": False
             })
             self.scene.color_idx += 1
             self.scene._undo_push()
@@ -4821,14 +5165,47 @@ class CADWindow(QMainWindow):
         if hasattr(self, 'right_panel') and self.right_panel is not None:
             if hasattr(self.right_panel, 'update_ui'):
                 self.right_panel.update_ui(self.scene.selected_objects)
+        self._sync_param_fields()
         if hasattr(self, 'outliner_list'):
             self._sync_outliner_selection()
+
+    def _sync_param_fields(self):
+        """Sincronizza i campi Parametri (X/Y/Z, Rot X/Y/Z) con l'oggetto selezionato.
+
+        X/Y/Z = centroide della mesh: stessa base di _apply_param (che trasla di
+        value - centroid), quindi il valore mostrato è riapplicabile senza scatti.
+        Rot X/Y/Z = rotazione memorizzata in obj.metadata (unico stato di rotazione
+        tracciato dal pannello; le rotazioni via gizmo non aggiornano il metadata).
+        blockSignals durante il setValue: nessun loop di segnali.
+        """
+        if not hasattr(self, 'par_x'):
+            return
+        if len(self.scene.selected_objects) != 1:
+            return
+        obj = self.scene.selected_objects[0]
+        centroid = obj.centroid if hasattr(obj, 'centroid') else obj.vertices.mean(axis=0)
+        values = (
+            (self.par_x, float(centroid[0])),
+            (self.par_y, float(centroid[1])),
+            (self.par_z, float(centroid[2])),
+            (self.par_rx, float(obj.metadata.get("rot_x", 0.0))),
+            (self.par_ry, float(obj.metadata.get("rot_y", 0.0))),
+            (self.par_rz, float(obj.metadata.get("rot_z", 0.0))),
+        )
+        for field, value in values:
+            if not math.isfinite(value):
+                continue
+            field.blockSignals(True)
+            field.setValue(value)
+            field.blockSignals(False)
     
     # --- OUTLINER ---
     def _setup_outliner(self):
         self.outliner_dock = QDockWidget("Outliner", self)
         self.outliner_dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
-        self.outliner_dock.setFeatures(QDockWidget.DockWidgetClosable | QDockWidget.DockWidgetMovable)
+        # Non chiudibile: l'Outliner deve restare sempre visibile (il collasso dei
+        # pannelli laterali non lo riguarda; è un dock separato dal layout centrale).
+        self.outliner_dock.setFeatures(QDockWidget.DockWidgetMovable)
         self.outliner_dock.setMinimumWidth(30)
         self.outliner_dock.setMaximumWidth(200)
         
@@ -4837,7 +5214,22 @@ class CADWindow(QMainWindow):
         self.outliner_list.itemSelectionChanged.connect(self._on_outliner_sel_changed)
         self.outliner_list.setAlternatingRowColors(True)
         self.outliner_list.setSpacing(0)
-        self.outliner_list.setStyleSheet("QListWidget::item { padding: 0px; }")
+        self.outliner_list.setStyleSheet(f"""
+            QListWidget {{
+                background: {BG_CARD};
+                color: {TEXT_BODY};
+                border: none;
+                outline: none;
+            }}
+            QListWidget::item {{ padding: 0px; border: none; }}
+            QListWidget::item:selected {{
+                background: {BG_ELEV};
+                color: {AMBER_LIGHT};
+            }}
+            QListWidget::item:hover {{
+                background: {BG_ELEV};
+            }}
+        """)
         
         self.outliner_dock.setWidget(self.outliner_list)
         self.addDockWidget(Qt.RightDockWidgetArea, self.outliner_dock)
@@ -4870,21 +5262,24 @@ class CADWindow(QMainWindow):
             color_label.setFixedSize(16, 16)
             layout.addWidget(color_label)
             name_label = QLabel(obj.metadata.get("name", "?"))
-            name_label.setStyleSheet("color: #0C1E36; font-size: 12px; padding: 1px 2px;")
+            name_label.setObjectName("outliner_name")
+            name_label.setStyleSheet(f"color: {TEXT_BODY}; font-size: 12px; padding: 1px 2px;")
             layout.addWidget(name_label, 1)
             vis = obj.metadata.get("visible", True)
             vis_btn = QPushButton()
+            vis_btn.setObjectName("outliner_vis")
             vis_btn.setIcon(_make_eye_icon(vis, 18))
             vis_btn.setFixedSize(20, 20)
-            vis_btn.setStyleSheet("QPushButton { border: none; background: transparent; padding: 0px; margin: 0px; } QPushButton:hover { background: #e0e0e0; border-radius: 2px; }")
+            vis_btn.setStyleSheet(f"QPushButton {{ border: none; background: transparent; padding: 0px; margin: 0px; }} QPushButton:hover {{ background: {BG_ELEV}; border-radius: 4px; }}")
             vis_btn.setToolTip("Mostra/Nascondi")
             vis_btn.clicked.connect(lambda checked, o=obj: self._toggle_outliner_vis(o))
             layout.addWidget(vis_btn)
             locked = obj.metadata.get("locked", False)
             lock_btn = QPushButton()
+            lock_btn.setObjectName("outliner_lock")
             lock_btn.setIcon(_make_lock_icon(locked, 18))
             lock_btn.setFixedSize(20, 20)
-            lock_btn.setStyleSheet("QPushButton { border: none; background: transparent; padding: 0px; margin: 0px; } QPushButton:hover { background: #e0e0e0; border-radius: 2px; }")
+            lock_btn.setStyleSheet(f"QPushButton {{ border: none; background: transparent; padding: 0px; margin: 0px; }} QPushButton:hover {{ background: {BG_ELEV}; border-radius: 4px; }}")
             lock_btn.setToolTip("Blocca/Sblocca")
             lock_btn.clicked.connect(lambda checked, o=obj: self._toggle_outliner_lock(o))
             layout.addWidget(lock_btn)
@@ -4923,7 +5318,23 @@ class CADWindow(QMainWindow):
                 continue
             idx = item.data(Qt.UserRole)
             if idx is not None and 0 <= idx < len(self.scene.objects):
-                item.setSelected(id(self.scene.objects[idx]) in sel_set)
+                obj = self.scene.objects[idx]
+                # Fix D1: aggiorna SEMPRE i testi (e le icone di stato) degli item
+                # esistenti, anche quando il conteggio non cambia (es. rinomina o
+                # "Adatta": il testo sostituito resta nella stessa posizione).
+                w = self.outliner_list.itemWidget(item)
+                if w is not None:
+                    name = obj.metadata.get("name", "?")
+                    lbl = w.findChild(QLabel, "outliner_name")
+                    if lbl is not None and lbl.text() != name:
+                        lbl.setText(name)
+                    vis_btn = w.findChild(QPushButton, "outliner_vis")
+                    if vis_btn is not None:
+                        vis_btn.setIcon(_make_eye_icon(obj.metadata.get("visible", True), 18))
+                    lock_btn = w.findChild(QPushButton, "outliner_lock")
+                    if lock_btn is not None:
+                        lock_btn.setIcon(_make_lock_icon(obj.metadata.get("locked", False), 18))
+                item.setSelected(id(obj) in sel_set)
         self.outliner_list.blockSignals(False)
     
     def _toggle_outliner_vis(self, obj):
@@ -4969,17 +5380,20 @@ class SplashScreen(QDialog):
         w, h = self.width(), self.height()
 
         margin = 48
-        p.setPen(QPen(QColor(200, 200, 210), 6))
-        p.setBrush(QColor(0, 0, 0, 30))
+        p.setPen(QPen(QColor(240, 180, 41, 200), 6))
+        p.setBrush(QColor(12, 30, 54, 235))
         p.drawRoundedRect(margin, margin, w - margin * 2, h - margin * 2, 24, 24)
 
         text = "TriviumCAD"
         colors = [
-            QColor(*[int(c * 255) for c in NEUTRAL_COLORS[i % len(NEUTRAL_COLORS)][:3]])
-            for i in range(len(text))
+            QColor(AMBER)
+            for _ in range(len(text))
         ]
         font_size = min(120, max(60, int((w - 260) / (len(text) * 0.71))))
-        font = QFont("Segoe UI", font_size, QFont.Bold)
+        font = QFont()
+        font.setFamilies(["Orbitron", "Inter", "Segoe UI"])
+        font.setPointSize(font_size)
+        font.setWeight(QFont.Black)
         spacing = int(font_size * 0.92)
 
         cx, cy = w // 2, h // 2 - 20
@@ -5005,9 +5419,11 @@ class SplashScreen(QDialog):
             p.drawText(-r.width() // 2, -r.height() // 2, r.width(), r.height(), Qt.AlignCenter, ch)
             p.restore()
 
-        font2 = QFont("Segoe UI", 18)
+        font2 = QFont()
+        font2.setFamilies(["Share Tech Mono", "Courier New", "Segoe UI"])
+        font2.setPointSize(18)
         p.setFont(font2)
-        p.setPen(QColor(180, 190, 200))
+        p.setPen(QColor(159, 179, 204))
         p.drawText(QRect(0, h - 50, w, 30), Qt.AlignCenter, "Caricamento in corso...")
 
         # --- CAD 2D con forme primitive ---
@@ -5027,9 +5443,9 @@ class SplashScreen(QDialog):
         total_w = letter_w * 3 + gap * 2
         start_x = cad_cx - total_w // 2
         cad_colors = [
-            QColor(*[int(c * 255) for c in NEUTRAL_COLORS[0][:3]]),
-            QColor(*[int(c * 255) for c in NEUTRAL_COLORS[1][:3]]),
-            QColor(*[int(c * 255) for c in NEUTRAL_COLORS[2][:3]]),
+            QColor(BRASS),
+            QColor(BRASS_LIGHT),
+            QColor(AMBER_DIM),
         ]
         segs = 18
 
@@ -5102,80 +5518,285 @@ class SplashScreen(QDialog):
         self.close()
 
 # === MAIN ===
-def main():
-    app = QApplication(sys.argv)
-    app.setStyleSheet(f"""
-        QMainWindow, QDialog {{
-            background-color: {BACKGROUND_COLOR};
-            color: {TEXT_COLOR};
+def _app_stylesheet() -> str:
+    """Foglio di stile globale dell'applicazione (palette da precetto).
+
+    Estratto da main() per essere riusato dagli script di verifica (screenshot)
+    senza duplicare il QSS: unica fonte, nessun drift.
+    """
+    return f"""
+        QWidget {{
+            font-family: {FONT_BODY};
+            color: {TEXT_BODY};
         }}
-        CADWindow {{
-            background-color: {BACKGROUND_COLOR};
+        QMainWindow, QDialog {{
+            background-color: {BG_PAGE};
+            color: {TEXT_BODY};
+        }}
+        CADWindow, QWidget#centralWidget {{
+            background-color: {BG_PAGE};
+        }}
+        QScrollArea {{
+            background-color: {BG_PAGE};
+            border: none;
+        }}
+        QScrollArea > QWidget > QWidget {{
+            background-color: {BG_PAGE};
         }}
         QGroupBox {{
             font-weight: bold;
-            color: {TEXT_COLOR};
-            border: 1px solid {BORDER_COLOR};
-            border-radius: 4px;
+            color: {TEXT_BODY};
+            border: 1px solid {BORDER_SOFT};
+            border-radius: 10px;
             margin-top: 1ex;
             padding-top: 10px;
+            background-color: {BG_CARD};
         }}
         QGroupBox::title {{
             subcontrol-origin: margin;
             left: 7px;
             padding: 0 3px 0 3px;
+            color: {AMBER};
+            font-family: {FONT_HEAD};
         }}
         QPushButton {{
-            background-color: {BUTTON_COLOR};
-            color: {TEXT_COLOR};
-            border: 1px solid {BORDER_COLOR};
-            border-radius: 3px;
+            background-color: {BG_CARD};
+            color: {TEXT_BODY};
+            border: 1px solid {BORDER_SOFT};
+            border-radius: 8px;
             padding: 4px 10px;
+            font-family: {FONT_HEAD};
             font-size: 11px;
         }}
         QPushButton:hover {{
-            background-color: #B8D4EC;
+            background-color: {BG_ELEV};
+            border-color: {AMBER_DARK};
+            color: {AMBER_LIGHT};
         }}
         QPushButton:pressed {{
-            background-color: #8CB4D4;
+            background-color: {AMBER};
+            color: {TEXT_ON_AMBER};
         }}
-        QComboBox, QDoubleSpinBox {{
-            background-color: #C4D8EC;
-            color: {TEXT_COLOR};
-            border: 1px solid {BORDER_COLOR};
-            border-radius: 3px;
-            padding: 2px 4px;
+        QPushButton:checked {{
+            background-color: {AMBER};
+            color: {TEXT_ON_AMBER};
+            border-color: {AMBER_DARK};
+        }}
+        QPushButton:disabled {{
+            background-color: {BG_PAGE};
+            color: {TEXT_MUTED};
+            border-color: {BORDER_SOFT};
+        }}
+        QComboBox, QDoubleSpinBox, QSpinBox {{
+            background-color: {BG_CARD};
+            color: {TEXT_BODY};
+            border: 1px solid {BORDER_SOFT};
+            border-radius: 8px;
+            padding: 2px 6px;
+            font-family: {FONT_MONO};
+        }}
+        QComboBox:hover, QDoubleSpinBox:hover, QSpinBox:hover {{
+            border-color: {AMBER_DARK};
+        }}
+        QComboBox::drop-down {{
+            border: none;
+            width: 18px;
+        }}
+        QComboBox QAbstractItemView {{
+            background-color: {BG_CARD};
+            color: {TEXT_BODY};
+            border: 1px solid {BORDER_SOFT};
+            selection-background-color: {BG_ELEV};
+            selection-color: {AMBER_LIGHT};
+        }}
+        QLineEdit, QPlainTextEdit, QTextEdit {{
+            background-color: {BG_CARD};
+            color: {TEXT_BODY};
+            border: 1px solid {BORDER_SOFT};
+            border-radius: 8px;
+            padding: 3px 6px;
+            selection-background-color: {BG_ELEV};
+            selection-color: {AMBER_LIGHT};
         }}
         QLabel {{
-            color: {TEXT_COLOR};
+            color: {TEXT_BODY};
+        }}
+        QCheckBox {{
+            color: {TEXT_BODY};
+            spacing: 6px;
+        }}
+        QCheckBox::indicator {{
+            width: 14px;
+            height: 14px;
+            border: 1px solid {BORDER_SOFT};
+            border-radius: 4px;
+            background: {BG_CARD};
+        }}
+        QCheckBox::indicator:checked {{
+            background: {AMBER};
+            border-color: {AMBER_DARK};
+        }}
+        QSlider::groove:horizontal {{
+            height: 4px;
+            background: {BG_ELEV};
+            border-radius: 2px;
+        }}
+        QSlider::handle:horizontal {{
+            background: {AMBER};
+            width: 12px;
+            margin: -5px 0;
+            border-radius: 6px;
+            border: 1px solid {AMBER_DARK};
+        }}
+        QSlider::handle:horizontal:hover {{
+            background: {AMBER_LIGHT};
+        }}
+        QScrollBar:vertical {{
+            background: {BG_PAGE};
+            width: 10px;
+            margin: 0;
+        }}
+        QScrollBar::handle:vertical {{
+            background: {BG_ELEV};
+            min-height: 24px;
+            border-radius: 5px;
+        }}
+        QScrollBar::handle:vertical:hover {{
+            background: {AMBER_DARK};
+        }}
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+            height: 0;
+        }}
+        QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
+            background: {BG_PAGE};
+        }}
+        QScrollBar:horizontal {{
+            background: {BG_PAGE};
+            height: 10px;
+            margin: 0;
+        }}
+        QScrollBar::handle:horizontal {{
+            background: {BG_ELEV};
+            min-width: 24px;
+            border-radius: 5px;
+        }}
+        QScrollBar::handle:horizontal:hover {{
+            background: {AMBER_DARK};
+        }}
+        QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
+            width: 0;
+        }}
+        QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{
+            background: {BG_PAGE};
         }}
         QToolBar {{
-            background-color: {BACKGROUND_COLOR};
+            background-color: {BG_PANEL};
             border: none;
+            border-bottom: 1px solid {BORDER_SOFT};
             spacing: 2px;
         }}
         QMenuBar {{
-            background-color: #9CBDDB;
-            color: {TEXT_COLOR};
+            background-color: {BG_PANEL};
+            color: {TEXT_BODY};
             padding: 4px;
+            border-bottom: 1px solid {BORDER_SOFT};
+        }}
+        QMenuBar::item {{
+            background: transparent;
+            padding: 4px 10px;
+            border-radius: 6px;
         }}
         QMenuBar::item:selected {{
-            background-color: {BUTTON_COLOR};
+            background-color: {BG_ELEV};
+            color: {AMBER_LIGHT};
+        }}
+        QMenuBar::item:pressed {{
+            background-color: {AMBER};
+            color: {TEXT_ON_AMBER};
         }}
         QMenu {{
-            background-color: #C4D8EC;
-            color: {TEXT_COLOR};
-            border: 1px solid {BORDER_COLOR};
-        }}
-        QMenu::item:selected {{
-            background-color: {BUTTON_COLOR};
-        }}
-        QStatusBar {{
-            background-color: #9CBDDB;
-            color: {TEXT_COLOR};
+            background-color: {BG_CARD};
+            color: {TEXT_BODY};
+            border: 1px solid {BORDER_SOFT};
             padding: 4px;
         }}
-    """)
+        QMenu::item {{
+            padding: 5px 22px 5px 14px;
+            border-radius: 6px;
+        }}
+        QMenu::item:selected {{
+            background-color: {BG_ELEV};
+            color: {AMBER_LIGHT};
+        }}
+        QMenu::separator {{
+            height: 1px;
+            background: {BORDER_SOFT};
+            margin: 4px 8px;
+        }}
+        QStatusBar {{
+            background-color: {BG_PANEL};
+            color: {TEXT_MUTED};
+            border-top: 1px solid {BORDER_SOFT};
+            padding: 4px;
+            font-family: {FONT_MONO};
+        }}
+        QDockWidget {{
+            color: {AMBER};
+            font-family: {FONT_HEAD};
+        }}
+        QDockWidget::title {{
+            background: {BG_CARD};
+            padding: 6px 8px;
+            border-bottom: 1px solid {BORDER_SOFT};
+            color: {AMBER};
+        }}
+        QListWidget, QTreeWidget {{
+            background-color: {BG_CARD};
+            color: {TEXT_BODY};
+            border: 1px solid {BORDER_SOFT};
+            border-radius: 8px;
+            outline: none;
+        }}
+        QListWidget::item:selected, QTreeWidget::item:selected {{
+            background-color: {BG_ELEV};
+            color: {AMBER_LIGHT};
+        }}
+        QTabWidget::pane {{
+            border: 1px solid {BORDER_SOFT};
+            border-radius: 8px;
+            background: {BG_CARD};
+        }}
+        QTabBar::tab {{
+            background: {BG_PANEL};
+            color: {TEXT_MUTED};
+            padding: 5px 12px;
+            border-top-left-radius: 8px;
+            border-top-right-radius: 8px;
+            margin-right: 2px;
+        }}
+        QTabBar::tab:selected {{
+            background: {BG_CARD};
+            color: {AMBER};
+        }}
+        QTabBar::tab:hover {{
+            background: {BG_ELEV};
+            color: {AMBER_LIGHT};
+        }}
+        QToolTip {{
+            background-color: {BG_CARD};
+            color: {TEXT_BODY};
+            border: 1px solid {AMBER_DARK};
+            padding: 4px 6px;
+        }}
+        QSplitter::handle {{
+            background: {BG_PANEL};
+        }}
+    """
+
+
+def main():
+    app = QApplication(sys.argv)
+    app.setStyleSheet(_app_stylesheet())
     
     splash = SplashScreen()
     splash.show()

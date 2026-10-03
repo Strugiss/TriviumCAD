@@ -1,16 +1,50 @@
-﻿"""TriviumCAD core - costanti globali (estratte da triviumcad.py, v1.2.0)."""
+﻿"""TriviumCAD core - costanti globali (estratte da triviumcad.py, v1.2.1)."""
 from typing import List, Dict, Any
 
 APP_NAME = "TriviumCAD"
-VERSION = "1.2.0"
+VERSION = "1.2.1"
 
-# Colori per il tema azzurro pastello
-BACKGROUND_COLOR = "#AEC8E0"
-TEXT_COLOR = "#0C1E36"
-BORDER_COLOR = "#2C5F8A"
-BUTTON_COLOR = "#C8DCF0"
-BUTTON_HOVER = "#CFFAFE"
-BUTTON_PRESSED = "#94E6F2"
+# =============================================================================
+# PALETTE STANDARD N47Lab (STANDARD_VISIVO.md — standard scuro)
+# Valori letti alla lettera dalle variabili :root dei CSS del portale.
+# =============================================================================
+# Sfondi (superfici scure)
+BG_PAGE = "#0C1E36"           # sfondo pagina
+BG_PANEL = "#10243F"          # pannelli, barre, header, status bar
+BG_CARD = "#132A47"           # card e blocchi di contenuto
+BG_ELEV = "#173258"           # superfici elevate / hover / selezionati
+BORDER_SOFT = "rgba(120, 160, 220, 0.18)"   # bordi tenui di separazione
+
+# Accenti
+AMBER = "#f0b429"             # accento primario: titoli, link, badge, valori, LED
+AMBER_LIGHT = "#f7c948"       # hover dell'ambra
+AMBER_DARK = "#8a6118"        # bordi badge/pannelli ambra, testo ambra secondario
+AMBER_DIM = "#d9a23c"         # testo ambra secondario (sottotitoli)
+AMBER_FAINT = "rgba(240, 180, 41, 0.14)"    # sfondi tenui di badge/evidenziazioni
+BRASS = "#b87333"             # accento secondario "ottone"
+BRASS_LIGHT = "#d4944a"       # hover/richiamo ottone
+TEXT_ON_AMBER = "#101014"     # testo scuro su superfici ambra
+
+# Verde CRT (solo accenti/LED/valori brevi — MAI testi lunghi)
+GREEN_CRT = "#33ff33"
+GREEN_DIM = "#1a9e1a"
+
+# Testi
+TEXT_BODY = "#dde6f5"         # testo principale su fondi scuri
+TEXT_MUTED = "#9fb3cc"        # testo secondario, label, status bar
+
+# Font (fallback documentati in STANDARD_VISIVO; nessun download)
+FONT_HEAD = "'Orbitron', 'Inter', sans-serif"
+FONT_BODY = "'Inter', 'Open Sans', sans-serif"
+FONT_MONO = "'Share Tech Mono', 'Courier New', monospace"
+
+# --- Alias legacy rimappati sulla palette scura (compatibilità) ---
+BACKGROUND_COLOR = BG_PAGE
+TEXT_COLOR = TEXT_BODY
+BORDER_COLOR = BORDER_SOFT
+BUTTON_COLOR = BG_CARD
+BUTTON_HOVER = BG_ELEV
+BUTTON_PRESSED = "#1d3b66"
 
 # Colori neutri per le forme
 NEUTRAL_COLORS: List[List[float]] = [

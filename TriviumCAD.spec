@@ -5,7 +5,7 @@ a = Analysis(
     ['triviumcad.py'],
     pathex=[],
     binaries=[],
-    datas=[('favicon.ico', '.')],
+    datas=[('favicon.ico', '.'), ('Immagini/2penaxe_64.png', 'Immagini')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

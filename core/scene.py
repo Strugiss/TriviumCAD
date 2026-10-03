@@ -58,8 +58,7 @@ class _UndoManager:
                 except Exception:
                     print("ERRORE: impossibile copiare oggetto per undo_stack (redo_state)")
                     continue
-            if redo_state["obj"]:
-                self.redo_stack.append(redo_state)
+            self.redo_stack.append(redo_state)
             self.scene.objects = state["obj"]
             self.scene.selected_objects = [self.scene.objects[i] for i in state.get("selected_idx", []) if i < len(self.scene.objects)]
             self.scene._needs_spatial_rebuild = True
@@ -81,8 +80,7 @@ class _UndoManager:
                 except Exception:
                     print("ERRORE: impossibile copiare oggetto per undo_state (redo)")
                     continue
-            if undo_state["obj"]:
-                self.undo_stack.append(undo_state)
+            self.undo_stack.append(undo_state)
             self.scene.objects = state["obj"]
             self.scene.selected_objects = [self.scene.objects[i] for i in state.get("selected_idx", []) if i < len(self.scene.objects)]
             self.scene._needs_spatial_rebuild = True
@@ -98,6 +96,9 @@ class Scene:
         self.undo_mgr = _UndoManager(self)
         self.color_idx: int = 0
         self.sketch_entities: List[Dict[str, Any]] = []
+        # 2PenAxE — sketch 2D multi-piano (entità JSON-safe + stato pannelli).
+        self.sketch_2d_entities: List[Dict[str, Any]] = []
+        self.sketch_2d_state: Dict[str, Any] = {}
         self.dimensions = []
         self.angle_dims = []
         self.snap_grid: bool = True
@@ -352,8 +353,11 @@ class Scene:
         self.start_operation()
         try:
             for obj in self.selected_objects:
-                if obj.metadata.get("assembly"):
+                asm_id = obj.metadata.get("assembly")
+                if asm_id:
                     obj.metadata["assembly"] = None
+                    if asm_id in self.assemblies:
+                        del self.assemblies[asm_id]
             
             self._notify(f"Separati {len(self.selected_objects)} oggetti")
         finally:
@@ -1085,6 +1089,12 @@ class Scene:
             for _ in range(iterations):
                 processed = processed.subdivide()
 
+            # Preserva i metadata dell'originale (nome, colore, layer, shape_type...)
+            # ed elimina le cache GL, riferite alla vecchia geometria.
+            processed.metadata.update(original.metadata.copy())
+            for key in ["_gl_verts", "_gl_normals", "_gl_vbo_verts", "_gl_vbo_normals"]:
+                processed.metadata.pop(key, None)
+
             index = self.objects.index(original)
             self.objects[index] = processed
             self.selected_objects = [processed]
@@ -1120,6 +1130,12 @@ class Scene:
                 )
             
             obj = obj.simplify_quadric_decimation(face_count=target_faces)
+
+            # Preserva i metadata dell'originale (nome, colore, layer, shape_type...)
+            # ed elimina le cache GL, riferite alla vecchia geometria.
+            obj.metadata.update(original.metadata.copy())
+            for key in ["_gl_verts", "_gl_normals", "_gl_vbo_verts", "_gl_vbo_normals"]:
+                obj.metadata.pop(key, None)
 
             index = self.objects.index(original)
             self.objects[index] = obj

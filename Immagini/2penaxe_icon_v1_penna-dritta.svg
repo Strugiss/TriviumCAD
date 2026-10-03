@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- 2PenAxE — icona N47Lab per TriviumCAD
+       Rebus: foglio millimetrato + penna (lama) + manico d'ascia ottone che sporge sotto.
+       Standard scuro: sfondo trasparente, foglio #10243F, griglia #78a0dc tenue,
+       penna #dde6f5/#f0b429, ottone #b87333/#d4944a. -->
+  <defs>
+    <clipPath id="sheetClip">
+      <rect x="76" y="72" width="360" height="300" rx="26"/>
+    </clipPath>
+    <linearGradient id="barrel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f2f6ff"/>
+      <stop offset="0.55" stop-color="#dde6f5"/>
+      <stop offset="1" stop-color="#b9c8de"/>
+    </linearGradient>
+    <linearGradient id="brass" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#7a4a20"/>
+      <stop offset="0.3" stop-color="#b87333"/>
+      <stop offset="0.58" stop-color="#d4944a"/>
+      <stop offset="1" stop-color="#9a6229"/>
+    </linearGradient>
+  </defs>
+
+  <!-- FOGLIO MILLIMETRATO -->
+  <rect x="76" y="72" width="360" height="300" rx="26" fill="#10243F"/>
+  <g clip-path="url(#sheetClip)">
+    <path d="M106 72 V372 M136 72 V372 M166 72 V372 M196 72 V372 M226 72 V372 M256 72 V372 M286 72 V372 M316 72 V372 M346 72 V372 M376 72 V372 M406 72 V372 M76 102 H436 M76 132 H436 M76 162 H436 M76 192 H436 M76 222 H436 M76 252 H436 M76 282 H436 M76 312 H436 M76 342 H436"
+          fill="none" stroke="#78a0dc" stroke-opacity="0.18" stroke-width="1.2"/>
+    <path d="M196 72 V372 M316 72 V372 M76 192 H436 M76 312 H436"
+          fill="none" stroke="#78a0dc" stroke-opacity="0.32" stroke-width="1.6"/>
+  </g>
+  <rect x="76" y="72" width="360" height="300" rx="26" fill="none" stroke="#78a0dc" stroke-opacity="0.55" stroke-width="3"/>
+
+  <!-- MANICO D'ASCIA (ottone) — passa davanti al foglio e sporge sotto -->
+  <rect x="242" y="170" width="28" height="282" rx="13" fill="url(#brass)" stroke="#6b3f1a" stroke-opacity="0.65" stroke-width="2"/>
+  <rect x="235" y="402" width="42" height="20" rx="7" fill="#d4944a" stroke="#7a4a20" stroke-width="2"/>
+  <line x1="245" y1="405" x2="245" y2="419" stroke="#7a4a20" stroke-width="1.6" stroke-opacity="0.7"/>
+  <line x1="267" y1="405" x2="267" y2="419" stroke="#7a4a20" stroke-width="1.6" stroke-opacity="0.7"/>
+  <rect x="248" y="444" width="16" height="24" rx="7" fill="#7a4a20"/>
+
+  <!-- PENNA (la lama) — centrata sul manico -->
+  <rect x="109" y="171" width="32" height="30" rx="9" fill="url(#brass)" stroke="#6b3f1a" stroke-opacity="0.65" stroke-width="2"/>
+  <rect x="137" y="167" width="192" height="38" rx="9" fill="url(#barrel)" stroke="#8fa3bf" stroke-width="2"/>
+  <line x1="150" y1="177" x2="318" y2="177" stroke="#ffffff" stroke-opacity="0.35" stroke-width="3" stroke-linecap="round"/>
+  <rect x="160" y="181" width="150" height="12" rx="6" fill="#f0b429" stroke="#d9a23c" stroke-width="1.5"/>
+  <path d="M329 167 L329 205 L379 197 L403 186 L379 175 Z" fill="#dde6f5" stroke="#9fb3cc" stroke-width="2" stroke-linejoin="round"/>
+  <path d="M379 175 L403 186 L379 197 Z" fill="#9fb3cc"/>
+</svg>

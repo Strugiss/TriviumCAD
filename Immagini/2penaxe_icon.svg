@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- 2PenAxE — icona N47Lab per TriviumCAD — v3 "foglio landscape + penna verticale" (03/10/2026)
+       Rebus: foglio millimetrato ORIZZONTALE (lato lungo come base) + penna VERTICALE al centro
+       che sporge sotto il lato lungo inferiore = manico; il foglio = testa. Punta in alto,
+       dentro il foglio (nessuna sporgenza sopra): una sola sporgenza = lettura "ascia" immediata.
+       Standard scuro: sfondo trasparente, foglio #10243F, griglia #78a0dc tenue,
+       penna #dde6f5/#f0b429, ottone #b87333/#d4944a. -->
+  <defs>
+    <clipPath id="sheetClip">
+      <rect x="64" y="64" width="384" height="192" rx="20"/>
+    </clipPath>
+    <linearGradient id="barrel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f2f6ff"/>
+      <stop offset="0.55" stop-color="#dde6f5"/>
+      <stop offset="1" stop-color="#b9c8de"/>
+    </linearGradient>
+    <linearGradient id="brass" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#7a4a20"/>
+      <stop offset="0.3" stop-color="#b87333"/>
+      <stop offset="0.58" stop-color="#d4944a"/>
+      <stop offset="1" stop-color="#9a6229"/>
+    </linearGradient>
+    <linearGradient id="steel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f0f5fd"/>
+      <stop offset="1" stop-color="#9fb3cc"/>
+    </linearGradient>
+  </defs>
+
+  <!-- FOGLIO MILLIMETRATO (landscape 2:1) -->
+  <rect x="64" y="64" width="384" height="192" rx="20" fill="#10243F"/>
+  <g clip-path="url(#sheetClip)">
+    <path d="M96 64 V256 M128 64 V256 M160 64 V256 M192 64 V256 M224 64 V256 M256 64 V256 M288 64 V256 M320 64 V256 M352 64 V256 M384 64 V256 M416 64 V256 M64 96 H448 M64 128 H448 M64 160 H448 M64 192 H448 M64 224 H448"
+          fill="none" stroke="#78a0dc" stroke-opacity="0.18" stroke-width="1.2"/>
+    <path d="M192 64 V256 M320 64 V256 M64 128 H448 M64 224 H448"
+          fill="none" stroke="#78a0dc" stroke-opacity="0.32" stroke-width="1.6"/>
+  </g>
+  <rect x="64" y="64" width="384" height="192" rx="20" fill="none" stroke="#78a0dc" stroke-opacity="0.7" stroke-width="3"/>
+
+  <!-- PENNA VERTICALE (davanti al foglio) — punta in alto, sporge SOLO sotto = manico d'ascia -->
+  <!-- punta conica -->
+  <path d="M245 110 C249 93 253 83 256 77 C259 83 263 93 267 110 Z" fill="url(#steel)" stroke="#8fa3bf" stroke-width="2" stroke-linejoin="round"/>
+  <!-- collarino ottone -->
+  <rect x="243" y="106" width="26" height="10" rx="3" fill="url(#brass)" stroke="#7a4a20" stroke-width="1.5"/>
+  <!-- sezione ambra -->
+  <rect x="238" y="114" width="36" height="28" rx="5" fill="#f0b429" stroke="#d9a23c" stroke-width="1.5"/>
+  <!-- anello ottone superiore -->
+  <rect x="233" y="140" width="46" height="10" rx="4" fill="url(#brass)" stroke="#7a4a20" stroke-width="1.5"/>
+  <!-- fusto bianco -->
+  <rect x="233" y="148" width="46" height="284" rx="8" fill="url(#barrel)" stroke="#8fa3bf" stroke-width="2"/>
+  <!-- feritoia ambra -->
+  <rect x="249" y="170" width="14" height="160" rx="7" fill="#f0b429" stroke="#d9a23c" stroke-width="1.5"/>
+  <line x1="252.5" y1="182" x2="252.5" y2="318" stroke="#ffffff" stroke-opacity="0.35" stroke-width="3" stroke-linecap="round"/>
+  <!-- anello ottone inferiore (sul manico) -->
+  <rect x="233" y="302" width="46" height="10" rx="4" fill="url(#brass)" stroke="#7a4a20" stroke-width="1.5"/>
+  <!-- fondello ottone (pomello del manico) -->
+  <rect x="233" y="428" width="46" height="22" rx="9" fill="url(#brass)" stroke="#6b3f1a" stroke-width="2"/>
+  <line x1="237" y1="430" x2="275" y2="430" stroke="#7a4a20" stroke-width="1.6" stroke-opacity="0.7"/>
+</svg>
