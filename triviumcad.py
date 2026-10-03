@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-TriviumCAD v1.2.1
+TriviumCAD v1.3.0
 Versione completa con funzionalità CAD e CAM.
 Copyright (c) 2026 N47Lab Team - Tutti i diritti riservati.
 """

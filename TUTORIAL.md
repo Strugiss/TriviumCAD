@@ -1,6 +1,6 @@
 # Tutorial TriviumCAD
 
-Guida all'uso di **TriviumCAD** — CAD 3D parametrico/mesh gratuito per stampa 3D (v1.2.1).
+Guida all'uso di **TriviumCAD** — CAD 3D parametrico/mesh gratuito per stampa 3D (v1.3.0).
 
 ---
 
