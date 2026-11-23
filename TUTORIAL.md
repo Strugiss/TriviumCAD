@@ -31,9 +31,9 @@ Guida all'uso di **TriviumCAD** — CAD 3D parametrico/mesh gratuito per stampa 
 |---|---|
 | **Toolbar (in alto)** | Da 2 a 3D, 2PenAxE (sketch 2D multi-piano), Nuovo/Apri/Salva, Booleane, Guscio, Snap, Magneti, donazioni, sito |
 | **Pannello sinistro** | Forme primitive (griglia), Meccanica (Filettatura, Affetta, Arrotonda), CAM |
-| **Pannello destro** | Testo 3D, Parametri (posizione/rotazione), Analisi mesh |
+| **Pannello destro** | Testo 3D, Proprietà (Layer/Shape), Parametri (posizione/rotazione), Analisi mesh |
 | **Outliner (destra)** | Elenco oggetti con layer; clic per selezionare, Ctrl+clic per multi-selezione |
-| **Proprietà** | Con un oggetto selezionato: volume, coordinate, dimensioni, stato mesh |
+| **Proprietà** | Con un oggetto selezionato: layer, shape, volume, coordinate, dimensioni, stato mesh |
 
 Comandi di vista: **Rotella** = zoom · **Ctrl + SX + Drag** = orbita 360° ·
 **Centrale + Drag** = pan · **Ctrl + Centrale + Drag** = rotazione asse Z.

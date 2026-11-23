@@ -798,6 +798,7 @@ class GLWidget(QOpenGLWidget):
         self.gizmo = GizmoRenderer()
         self._measure_overlay = _MeasureOverlay(self)
         self._gl_ready = False
+        self._vbo_pendenti = []
         self.frames = 0
         self._modelview_matrix = None
         self._projection_matrix = None
@@ -918,6 +919,7 @@ class GLWidget(QOpenGLWidget):
             self.physical_height = physical_height
             
             glViewport(0, 0, physical_width, physical_height)
+            self._svuota_vbo_pendenti()
             
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
             
@@ -1177,8 +1179,22 @@ class GLWidget(QOpenGLWidget):
     
     def _invalidate_all_vbos(self):
         for obj in self.scene.objects:
-            obj.metadata.pop('_gl_verts', None)
-            obj.metadata.pop('_gl_normals', None)
+            for key in ("_gl_verts", "_gl_normals", "_gl_vbo_verts", "_gl_vbo_normals"):
+                value = obj.metadata.pop(key, None)
+                if key in ("_gl_vbo_verts", "_gl_vbo_normals") and isinstance(value, (int, np.integer)):
+                    self._vbo_pendenti.append(int(value))
+            obj.metadata.pop("_gl_vbo_count", None)
+
+    def _svuota_vbo_pendenti(self):
+        """Cancella i VBO invalidati; va chiamato con contesto OpenGL corrente."""
+        if not self._vbo_pendenti:
+            return
+        ids = self._vbo_pendenti
+        self._vbo_pendenti = []
+        try:
+            glDeleteBuffers(len(ids), ids)
+        except Exception as e:
+            print(f"[TriviumCAD] glDeleteBuffers (cache GL invalidata): {e}")
 
     def _draw_mesh(self, mesh, is_selected):
         try:
@@ -1443,6 +1459,10 @@ class GLWidget(QOpenGLWidget):
                 layer = obj.metadata.get("layer", "Default")
                 if not self.scene.layers.get(layer, {}).get("visible", True):
                     continue
+                # Un oggetto nascosto resta in scena (outliner e occhio attivi),
+                # ma non deve essere selezionabile nel viewport.
+                if obj.metadata.get("visible", True) is False:
+                    continue
                 if obj.ray.intersects_any([ray_origin], [ray_direction]):
                     locations, _, _ = obj.ray.intersects_location([ray_origin], [ray_direction])
                     if locations is not None and len(locations) > 0:
@@ -1479,12 +1499,61 @@ class GLWidget(QOpenGLWidget):
             print(f"Errore in _get_sketch_coords: {e}")
             return 0.0, 0.0
     
+    def _pick_surface_point(self, position):
+        """Punto 3D reale sotto il cursore, sulla superficie della mesh colpita.
+
+        Usa lo stesso raggio di scena di `_pick_object` e interseca la mesh
+        dell'oggetto visibile più vicino (quello scelto dal pick). Nessuna
+        chiamata nel percorso di render: solo sui click di misura.
+        Ritorna (np.ndarray [x, y, z], oggetto) oppure (None, None).
+        """
+        try:
+            obj = self._pick_object(position)
+            if obj is None:
+                return None, None
+            ray_origin, ray_direction = self._screen_to_ray(
+                position.x(), position.y())
+            if ray_origin is None or ray_direction is None:
+                return None, None
+            locations, _, _ = obj.ray.intersects_location(
+                [ray_origin], [ray_direction])
+            if locations is None or len(locations) == 0:
+                return None, None
+            dists = np.linalg.norm(locations - ray_origin, axis=1)
+            point = np.asarray(
+                locations[int(np.argmin(dists))], dtype=np.float64)
+            return point, obj
+        except Exception as e:
+            print(f"Errore in _pick_surface_point: {e}")
+            return None, None
+
+    def _get_measure_point(self, position):
+        """Punto 3D della misura: superficie colpita, altrimenti piano Z=0.
+
+        Fallback dichiarato: se il raggio non colpisce alcuna geometria
+        visibile, si usa l'intersezione col piano Z=0 (`_get_sketch_coords`),
+        come nella misura 2D preesistente.
+        """
+        try:
+            point, _obj = self._pick_surface_point(position)
+            if point is not None:
+                return point
+            px, py = self._get_sketch_coords(position)
+            return np.array([px, py, 0.0], dtype=np.float64)
+        except Exception as e:
+            print(f"Errore in _get_measure_point: {e}")
+            return np.array([0.0, 0.0, 0.0], dtype=np.float64)
+
     def _measure_click(self, position):
         try:
             if self.scene.measurement_mode is None:
                 return
-            px, py = self._get_sketch_coords(position)
-            self.scene.measurement_points.append([px, py, 0.0])
+            if self.scene.measurement_done:
+                # Misura completata: resta in scena finché Esc o nuova misura.
+                return
+            pt = self._get_measure_point(position)
+            self.scene.measurement_points.append(
+                [float(pt[0]), float(pt[1]), float(pt[2])])
             self.update()
             self._update_measure_overlay()
             mode = self.scene.measurement_mode
@@ -1493,9 +1562,11 @@ class GLWidget(QOpenGLWidget):
                 remaining = need - len(self.scene.measurement_points)
                 self.window.status_bar.showMessage(f"Misura: clicca altri {remaining} punto/i", 2000)
                 return
+            # Punti sufficienti: la misura è completa ma NON viene azzerata.
+            self.scene.measurement_done = True
             pts = self.scene.measurement_points
             if mode == "distance":
-                d = math.dist(pts[0][:2], pts[1][:2])
+                d = math.dist(pts[0], pts[1])
                 if d > 1e-9 and self.scene.selected_objects:
                     nuovo, ok = QInputDialog.getDouble(
                         self.window,
@@ -1521,8 +1592,6 @@ class GLWidget(QOpenGLWidget):
             else:
                 a = math.degrees(self._angle_between(pts[0], pts[1], pts[2]))
                 self.window.status_bar.showMessage(f"Angolo: {a:.2f}°", 5000)
-            self.scene.measurement_mode = None
-            self.scene.measurement_points = []
             self.update()
             self._update_measure_overlay()
         except Exception as e:
@@ -1530,8 +1599,8 @@ class GLWidget(QOpenGLWidget):
     
     @staticmethod
     def _angle_between(p1, p2, p3):
-        u = np.array(p1[:2], dtype=np.float64) - np.array(p2[:2], dtype=np.float64)
-        v = np.array(p3[:2], dtype=np.float64) - np.array(p2[:2], dtype=np.float64)
+        u = np.array(p1[:3], dtype=np.float64) - np.array(p2[:3], dtype=np.float64)
+        v = np.array(p3[:3], dtype=np.float64) - np.array(p2[:3], dtype=np.float64)
         nu = np.linalg.norm(u)
         nv = np.linalg.norm(v)
         if nu < 1e-12 or nv < 1e-12:
@@ -1575,6 +1644,26 @@ class GLWidget(QOpenGLWidget):
         except Exception as e:
             print(f"Errore in _snap_selection_xy: {e}")
     
+    @staticmethod
+    def _testo_misura(mode, points):
+        """Testo numerico dell'overlay misura, con la formula della status bar.
+
+        Distanza: math.dist 3D sui primi due punti in mm; angolo: angolo al
+        vertice (secondo punto) in gradi con vettori 3D. Punti insufficienti o
+        modo sconosciuto: "".
+        """
+        try:
+            pts = list(points or [])
+            if mode == "distance" and len(pts) >= 2:
+                return "%.2f mm" % math.dist(pts[0], pts[1])
+            if mode == "angle" and len(pts) >= 3:
+                return "%.1f°" % math.degrees(
+                    GLWidget._angle_between(pts[0], pts[1], pts[2]))
+            return ""
+        except Exception as e:
+            print(f"Errore in _testo_misura: {e}")
+            return ""
+
     def _draw_measurement_overlay(self, painter=None):
         try:
             if self.scene.measurement_mode is None or not self.scene.measurement_points:
@@ -1598,6 +1687,35 @@ class GLWidget(QOpenGLWidget):
                     # cade piena dentro i pixel (altrimenti risulta sdoppiata al 50%).
                     p.drawLine(QPointF(scr[i][0] + 0.5, scr[i][1] + 0.5),
                                QPointF(scr[i + 1][0] + 0.5, scr[i + 1][1] + 0.5))
+                testo = self._testo_misura(self.scene.measurement_mode, pts)
+                if testo:
+                    font = QFont(p.font())
+                    font.setPixelSize(13)
+                    font.setBold(True)
+                    p.setFont(font)
+                    met = p.fontMetrics()
+                    larg = met.boundingRect(testo).width() + 12
+                    alt = met.height() + 6
+                    if self.scene.measurement_mode == "angle":
+                        # Vicino al vertice (secondo punto cliccato).
+                        cx = scr[1][0] + 14.0
+                        cy = scr[1][1] - alt - 10.0
+                    else:
+                        # Centrato sul punto medio del segmento, sollevato.
+                        cx = (scr[0][0] + scr[1][0]) / 2.0 - larg / 2.0
+                        cy = (scr[0][1] + scr[1][1]) / 2.0 - alt - 12.0
+                    area = p.window()
+                    aw = area.width() if area.width() > 0 else self.width()
+                    ah = area.height() if area.height() > 0 else self.height()
+                    x = min(max(cx, 2.0), max(2.0, aw - larg - 2.0))
+                    y = min(max(cy, 2.0), max(2.0, ah - alt - 2.0))
+                    rect = QRectF(x, y, float(larg), float(alt))
+                    p.setBrush(QColor(12, 30, 54, 214))
+                    p.setPen(QPen(QColor(184, 115, 51), 1))
+                    p.drawRoundedRect(rect, 3.0, 3.0)
+                    p.setBrush(Qt.NoBrush)
+                    p.setPen(QColor(247, 201, 72))
+                    p.drawText(rect, int(Qt.AlignCenter), testo)
             if painter is None:
                 p.end()
         except Exception as e:
@@ -1629,7 +1747,11 @@ class GLWidget(QOpenGLWidget):
             if not (QApplication.keyboardModifiers() & (Qt.ControlModifier | Qt.ShiftModifier)):
                 self.scene.clear_selection()
             
-            objects_to_test = self.scene.objects
+            # Il box select non deve includere gli oggetti nascosti.
+            objects_to_test = [
+                obj for obj in self.scene.objects
+                if obj.metadata.get("visible", True) is not False
+            ]
             
             for obj in objects_to_test:
                 if hasattr(obj, 'bounds') and obj.bounds is not None and len(obj.bounds) == 2:
@@ -2047,6 +2169,7 @@ class GLWidget(QOpenGLWidget):
                 if self.scene.measurement_mode is not None:
                     self.scene.measurement_mode = None
                     self.scene.measurement_points = []
+                    self.scene.measurement_done = False
                     self.window.status_bar.showMessage("Misurazione annullata", 2000)
                     self.update()
                     self._update_measure_overlay()
@@ -2206,8 +2329,8 @@ class TutorialDialog(QDialog):
                                "• <b style='color:#7f9dff;'>● Blu = Sopra</b> (Asse Z, altezza)</p>"
                                "<h3>Pannelli:</h3>"
                                "<p>• <b>Sinistro:</b> Forme Primitive, Meccanica (Filettatura/Affetta/Arrotonda), CAM<br>"
-                               "• <b>Destro:</b> Testo 3D, Parametri (posizione/rotazione), Analisi<br>"
-                               "• <b>Proprietà:</b> (seleziona un oggetto) mostra volume, coordinate, dimensioni, stato mesh<br>"
+                               "• <b>Destro:</b> Testo 3D, Proprietà (Layer/Shape), Parametri (posizione/rotazione), Analisi<br>"
+                               "• <b>Proprietà:</b> (seleziona un oggetto) mostra layer, shape, volume, coordinate, dimensioni, stato mesh<br>"
                                "• <b>Toolbar:</b> Da2 a 3D, Nuovo/Apri/Salva, Booleane, Guscio, Snap, Magneti</p>"
                                "<p><b>N.B.</b> Ogni operazione è annullabile con Ctrl+Z.</p>"),
 
@@ -2400,7 +2523,8 @@ class TutorialDialog(QDialog):
                            "• <b>Bounding Box:</b> dimensioni X, Y, Z min/max e centro<br>"
                            "• <b>Tenuta Stagna:</b> verifica se la mesh è watertight (chiusa, senza buchi)</p>"
                            "<h3>Pannello Proprietà (automatico alla selezione):</h3>"
-                           "<p>• Scheda 'Selezione': conteggio, volume totale, area totale<br>"
+                           "<p>• Gruppo 'Proprietà': Layer e Shape dell'oggetto selezionato<br>"
+                           "• Scheda 'Selezione': conteggio, volume totale, area totale<br>"
                            "• Scheda 'Coordinate & Dimensioni': centro (X,Y,Z), dimensioni (L,H,P)<br>"
                            "• Scheda 'Stato': Volume, Area, Watertight (singolo oggetto)<br>"
                            "• Parametri dinamici modificabili (raggio, altezza, ecc.)</p>"),
@@ -3318,6 +3442,23 @@ class _CaptureStream:
             except Exception as e:
                 print(f"[TriviumCAD] _CaptureStream.flush: {e}")
 
+class _OutlinerNameLabel(QLabel):
+    """Etichetta del nome nell'Outliner: doppio click -> rinomina.
+
+    Gli item usano setItemWidget, quindi il doppio click sul nome non arriva
+    in modo affidabile a QListWidget.itemDoubleClicked. L'etichetta emette il
+    segnale e accetta l'evento: il dialogo non si apre due volte.
+    """
+    doubleClicked = pyqtSignal()
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.doubleClicked.emit()
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
+
 class ConsoleDialog(QDialog):
     def __init__(self, scene, gl_widget, parent=None):
         super().__init__(parent)
@@ -3460,6 +3601,7 @@ class ConsoleDialog(QDialog):
                 self.output.append(f'<span style="color:#ff6b6b;">{traceback.format_exc()}</span>')
         except Exception as e:
             self.output.append(f'<span style="color:#ff6b6b;">{traceback.format_exc()}</span>')
+        self.gl_widget._invalidate_all_vbos()
         self.gl_widget.update()
         scroll = self.output.verticalScrollBar()
         scroll.setValue(scroll.maximum())
@@ -4045,6 +4187,20 @@ class CADWindow(QMainWindow):
         text_layout.addLayout(btn_row)
         text_layout.addWidget(QPushButton(_make_icon("Ba", (160,100,80), 16), "Bassorilievo", clicked=self._bassorilievo))
         layout.addWidget(text_group)
+
+        prop_group = QGroupBox("Proprietà")
+        prop_layout = QFormLayout(prop_group)
+        prop_layout.setSpacing(2)
+        self.prop_layer = QLabel("—")
+        self.prop_layer.setObjectName("prop_layer")
+        self.prop_shape = QLabel("—")
+        self.prop_shape.setObjectName("prop_shape")
+        for _lbl in (self.prop_layer, self.prop_shape):
+            _lbl.setStyleSheet(f"color: {TEXT_BODY}; font-weight: normal; padding: 1px 0;")
+            _lbl.setMinimumHeight(20)
+        prop_layout.addRow("Layer:", self.prop_layer)
+        prop_layout.addRow("Shape:", self.prop_shape)
+        layout.addWidget(prop_group)
 
         par_group = QGroupBox("Parametri")
         par_layout = QFormLayout(par_group)
@@ -5169,6 +5325,28 @@ class CADWindow(QMainWindow):
         if hasattr(self, 'outliner_list'):
             self._sync_outliner_selection()
 
+    def _sync_property_fields(self):
+        """Aggiorna Layer/Shape del pannello Proprietà dalla selezione corrente.
+
+        Nessuna selezione -> "—"; selezione singola -> metadata "layer" (default
+        "Default") e "shape_type" (default "—"); selezione multipla -> il valore
+        comune se tutte le voci coincidono, altrimenti "—". Solo setText sulle
+        label: nessun segnale emesso, nessun loop.
+        """
+        layer_label = getattr(self, "prop_layer", None)
+        shape_label = getattr(self, "prop_shape", None)
+        if layer_label is None or shape_label is None:
+            return
+        objs = self.scene.selected_objects
+        if not objs:
+            layer_label.setText("—")
+            shape_label.setText("—")
+            return
+        layers = {str((getattr(o, "metadata", None) or {}).get("layer", "Default")) for o in objs}
+        shapes = {str((getattr(o, "metadata", None) or {}).get("shape_type", "—")) for o in objs}
+        layer_label.setText(layers.pop() if len(layers) == 1 else "—")
+        shape_label.setText(shapes.pop() if len(shapes) == 1 else "—")
+
     def _sync_param_fields(self):
         """Sincronizza i campi Parametri (X/Y/Z, Rot X/Y/Z) con l'oggetto selezionato.
 
@@ -5178,6 +5356,7 @@ class CADWindow(QMainWindow):
         tracciato dal pannello; le rotazioni via gizmo non aggiornano il metadata).
         blockSignals durante il setValue: nessun loop di segnali.
         """
+        self._sync_property_fields()
         if not hasattr(self, 'par_x'):
             return
         if len(self.scene.selected_objects) != 1:
@@ -5212,6 +5391,9 @@ class CADWindow(QMainWindow):
         self.outliner_list = QListWidget()
         self.outliner_list.setSelectionMode(QListWidget.ExtendedSelection)
         self.outliner_list.itemSelectionChanged.connect(self._on_outliner_sel_changed)
+        self.outliner_list.itemDoubleClicked.connect(self._on_outliner_item_double_clicked)
+        self.outliner_list.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.outliner_list.customContextMenuRequested.connect(self._on_outliner_context_menu)
         self.outliner_list.setAlternatingRowColors(True)
         self.outliner_list.setSpacing(0)
         self.outliner_list.setStyleSheet(f"""
@@ -5261,9 +5443,10 @@ class CADWindow(QMainWindow):
             color_label.setPixmap(pix)
             color_label.setFixedSize(16, 16)
             layout.addWidget(color_label)
-            name_label = QLabel(obj.metadata.get("name", "?"))
+            name_label = _OutlinerNameLabel(obj.metadata.get("name", "?"))
             name_label.setObjectName("outliner_name")
             name_label.setStyleSheet(f"color: {TEXT_BODY}; font-size: 12px; padding: 1px 2px;")
+            name_label.doubleClicked.connect(lambda o=obj: self._rename_object(o))
             layout.addWidget(name_label, 1)
             vis = obj.metadata.get("visible", True)
             vis_btn = QPushButton()
@@ -5289,6 +5472,50 @@ class CADWindow(QMainWindow):
                 item.setSelected(True)
         self.outliner_list.blockSignals(False)
     
+    def _outliner_object_from_item(self, item):
+        if item is None:
+            return None
+        idx = item.data(Qt.UserRole)
+        if idx is None or not (0 <= idx < len(self.scene.objects)):
+            return None
+        return self.scene.objects[idx]
+
+    def _rename_object(self, obj):
+        """Rinomina un oggetto: aggiorna solo metadata['name'] e l'Outliner.
+
+        Nessun effetto su geometria, selezione o undo. Annulla o testo vuoto
+        lasciano il nome invariato.
+        """
+        if obj is None:
+            return
+        nome_corrente = obj.metadata.get("name", "?")
+        nuovo, ok = QInputDialog.getText(
+            self, "Rinomina oggetto", "Nuovo nome:", text=nome_corrente
+        )
+        if not ok:
+            return
+        nuovo = nuovo.strip()
+        if not nuovo:
+            return
+        obj.metadata["name"] = nuovo
+        self._refresh_outliner()
+
+    def _on_outliner_item_double_clicked(self, item):
+        self._rename_object(self._outliner_object_from_item(item))
+
+    def _on_outliner_context_menu(self, pos):
+        # customContextMenuRequested passa coordinate del widget; itemAt
+        # lavora in coordinate del viewport.
+        pos_vp = self.outliner_list.viewport().mapFrom(self.outliner_list, pos)
+        obj = self._outliner_object_from_item(self.outliner_list.itemAt(pos_vp))
+        if obj is None:
+            return
+        menu = QMenu(self)
+        azione_rinomina = menu.addAction("Rinomina…")
+        scelta = menu.exec_(self.outliner_list.viewport().mapToGlobal(pos_vp))
+        if scelta is azione_rinomina:
+            self._rename_object(obj)
+
     def _on_outliner_sel_changed(self):
         new_sel = []
         for i in range(self.outliner_list.count()):

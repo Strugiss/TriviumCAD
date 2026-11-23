@@ -113,6 +113,7 @@ class Scene:
         self._needs_spatial_rebuild = True
         self.measurement_mode = None
         self.measurement_points = []
+        self.measurement_done = False
         self.active_tool = "selection"
         self.mirror_axis = "x"
         self.fillet_radius = 1.0
@@ -1381,6 +1382,7 @@ class Scene:
         try:
             self.measurement_mode = "distance"
             self.measurement_points = []
+            self.measurement_done = False
             self._notify("Clicca su due punti per misurare la distanza")
             return True
         except Exception as e:
@@ -1395,6 +1397,7 @@ class Scene:
         try:
             self.measurement_mode = "angle"
             self.measurement_points = []
+            self.measurement_done = False
             self._notify("Clicca su tre punti per misurare l'angolo")
             return True
         except Exception as e:
@@ -1469,11 +1472,13 @@ class Scene:
                 obj.apply_translation(center)
                 obj.metadata.pop("_gl_verts", None)
     
-    def scale_selection_uniform(self, factor: float) -> bool:
-        """Scala uniforme della selezione attorno al centroide di ciascun oggetto.
+    def scale_selection_uniform(self, factor: float, ancora_z: float = 0.0) -> bool:
+        """Scala uniforme della selezione con ancoraggio al piano Z.
 
-        Non usa scale_selection (sx,sy,sz separati, centro globale della selezione):
-        qui un singolo fattore, centro = obj.centroid, vertici (v-c)*s+c.
+        X/Y: attorno al centroide di ciascun oggetto (comportamento preesistente).
+        Z: attorno al piano ancora_z (default 0.0): z' = (z - ancora_z)*s + ancora_z.
+        Un punto sul piano resta fermo, così la base da stampa non scende sotto
+        il piano di appoggio.
         Annullabile con l'undo (push dello stato prima della mutazione).
         """
         if not self.selected_objects:
@@ -1481,6 +1486,13 @@ class Scene:
             return False
         if not np.isfinite(factor) or factor <= 0.0:
             self._notify(f"Fattore di scala non valido: {factor}")
+            return False
+        try:
+            piano_z = float(ancora_z)
+        except (TypeError, ValueError):
+            piano_z = float("nan")
+        if not np.isfinite(piano_z):
+            self._notify(f"Piano di ancoraggio Z non valido: {ancora_z}")
             return False
         self.start_operation()
         try:
@@ -1493,8 +1505,10 @@ class Scene:
                     c = np.asarray(obj.centroid, dtype=np.float64).reshape(3)
                 except Exception:
                     c = np.asarray(obj.vertices, dtype=np.float64).mean(axis=0)
+                # X/Y sul centroide dell'oggetto, Z sul piano di ancoraggio.
+                ancora = np.array([c[0], c[1], piano_z], dtype=np.float64)
                 verts = np.asarray(obj.vertices, dtype=np.float64)
-                obj.vertices = (verts - c) * factor + c
+                obj.vertices = (verts - ancora) * factor + ancora
                 for key in cache_keys:
                     obj.metadata.pop(key, None)
                 scaled += 1

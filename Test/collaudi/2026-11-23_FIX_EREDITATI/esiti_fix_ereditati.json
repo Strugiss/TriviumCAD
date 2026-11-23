@@ -1,0 +1,62 @@
+{
+  "1_picking_nascosti": {
+    "ok": true,
+    "click_nascosto": true,
+    "click_visibile": true,
+    "box_select": true
+  },
+  "2_console_cache": {
+    "ok": true,
+    "volume_prima": 8000.0,
+    "volume_dopo": 1000.0,
+    "cache_subito": false
+  },
+  "3_overlay_misura": {
+    "ok": true,
+    "testo": "9.87 mm",
+    "distanza": 9.867845237269607,
+    "done": true,
+    "esc": true
+  },
+  "4_rinomina_outliner": {
+    "ok": true,
+    "nome": "Rinominato",
+    "etichetta": "Rinominato"
+  },
+  "5_scala_z0": {
+    "ok": true,
+    "zmin": 0.0,
+    "zmax": 39.61946910017251,
+    "volume": 62190.7730304076,
+    "distanza": 10.0960464409216,
+    "fattore": 1.9809734550086255
+  },
+  "6_proprieta": {
+    "ok": true,
+    "box": [
+      "Default",
+      "box"
+    ],
+    "cilindro": [
+      "Default",
+      "cylinder"
+    ],
+    "deselezione": [
+      "—",
+      "—"
+    ],
+    "multi": [
+      "Default",
+      "—"
+    ]
+  },
+  "7_misura_3d": {
+    "ok": true,
+    "distanza": 9.936199468379073,
+    "z": [
+      30.0,
+      30.0
+    ],
+    "testo": "9.94 mm"
+  }
+}
