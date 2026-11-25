@@ -3,7 +3,7 @@
 Dall'idea all'oggetto stampato senza cambiare programma.
 
 [![Licenza: MIT](https://img.shields.io/badge/licenza-MIT-brightgreen?style=flat-square)](LICENSE)
-[![Versione](https://img.shields.io/badge/versione-1.3.0-f0b429?style=flat-square)](https://github.com/Strugiss/TriviumCAD/releases)
+[![Versione](https://img.shields.io/badge/versione-1.3.1-f0b429?style=flat-square)](https://github.com/Strugiss/TriviumCAD/releases)
 [![Piattaforma](https://img.shields.io/badge/Windows-10%2F11-0078D6?style=flat-square&logo=windows&logoColor=white)]()
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white)]()
 [![Test](https://img.shields.io/badge/test-25%20inclusi-brightgreen?style=flat-square)](Test/)

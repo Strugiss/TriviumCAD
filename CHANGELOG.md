@@ -5,6 +5,17 @@ Tutte le modifiche notevoli del progetto TriviumCAD sono documentate in questo f
 Il formato segue [Keep a Changelog](https://keepachangelog.com/it/1.1.0/);
 versioning semantico: `MAJOR.MINOR.PATCH`.
 
+## [1.3.1] - 2026-11-24
+
+### Fixed
+- Picking: gli oggetti nascosti non sono più selezionabili (click e box-select).
+- Console: invalidazione completa delle cache GL e cancellazione dei VBO pendenti.
+- Misura: badge con distanza/angolo nell'overlay, misura persistente.
+- Outliner: rinomina con doppio click e menu contestuale.
+- Scala uniforme ancorata a Z=0.
+- Pannello Proprietà con Layer/Shape sincronizzati alla selezione.
+- Misura 3D reale su Z≠0 (ray-cast sulla mesh, fallback Z=0 sul vuoto).
+
 ## [1.3.0] - 2026-10-04
 
 ### Corretto — round-trip file: metadata filettatura esterna, export solo visibili, testo 3D
@@ -52,8 +63,8 @@ versioning semantico: `MAJOR.MINOR.PATCH`.
   sdoppiata al 50% dall'antialiasing). Smoke: dopo Ctrl+M + 2 click, pixel
   esatti `(255,200,60)` = 6, vicini (tol 8) = 209, sequenza orizzontale di
   208 px a y=444 tra i punti riproiettati; screenshot
-  `%TEMP%\opencode\fix_rt_overlay_measure_win.png` e crop
-  `%TEMP%\opencode\fix_rt_overlay_measure_fascia.png`.
+  `fix_rt_overlay_measure_win.png` e crop
+  `fix_rt_overlay_measure_fascia.png`.
 - **Metadata preservati** (l'Outliner non mostra più `?`): `Scene.subdivide` e
   `Scene.decimate` (`core/scene.py`) copiano i metadata dell'originale (nome,
   colore, layer, shape_type, params) sul risultato e rimuovono le cache GL
@@ -92,7 +103,7 @@ versioning semantico: `MAJOR.MINOR.PATCH`.
   41/41, 41/41, 41/41; pixel azzurri/bianchi canvas A **605/891**, canvas B
   **838/619**; viste default A e B `(-45°, 30°)`; i 4 pulsanti vista
   applicano le viste corrette. Screenshot:
-  `%TEMP%\opencode\2penaxe_viste_01_dialog_iso.png`, `..._02_canvas_A.png`,
+  `2penaxe_viste_01_dialog_iso.png`, `..._02_canvas_A.png`,
   `..._03_canvas_B.png`, `..._04_pulsante_alto.png`, `..._05_finale_iso.png`.
 - Verifica Windows: `python -m py_compile sketch.py` OK;
   `python -m pytest Test/ -q` → **25 passed**. Backup preventivo:
@@ -141,7 +152,7 @@ versioning semantico: `MAJOR.MINOR.PATCH`.
   (sketch 2D → FATTO v1), `TriviumCAD.spec` (icona nei datas per PyInstaller).
 - Verifica Windows: `python -m py_compile` OK; `python -m pytest Test/ -q` →
   **25 passed** (10 baseline + 15 nuovi in `Test/test_sketch.py`); smoke GUI
-  reale (`%TEMP%\opencode\smoke_2penaxe.py`) con dialog modale via `exec_`:
+  reale (`smoke_2penaxe.py`) con dialog modale via `exec_`:
   pannelli A=XY/B=XZ, viste Alto/Fronte; live 1→2→3→4 entità; snap Endpoint
   su `(-60.00, -40.00)` con aggancio `p1` esatto e marcatore visibile; snap
   Griglia su `(10.00, 10.00)`; misura 3-4-5 = `50.0 mm`; undo 4→3 e redo →4;
@@ -181,11 +192,11 @@ versioning semantico: `MAJOR.MINOR.PATCH`.
   10 passed; GUI reale con campionamento PIL di OGNI pulsante — sfondo
   `#132A47` 10/10, bordo `#f0b429` 10/10 (4 lati), testo bianco 10/10, emoji
   10/10; Snap/Magneti checked: sfondo `#173258`, bordo `#f7c948`. Screenshot:
-  `%TEMP%\opencode\toolbar_base.png`, `toolbar_base_full.png`,
+  `toolbar_base.png`, `toolbar_base_full.png`,
   `toolbar_checked.png`.
   Verifica finale fix emoji: 10/10 a colori anche con la metrica posizionale
   che esclude il bordo (x=8..34; 🛡️ 95, 🎯 104, 💖 117, 📂 121), sfondo/
-  bordo/testo 10/10; screenshot `%TEMP%\opencode\toolbar_emoji_final.png`
+  bordo/testo 10/10; screenshot `toolbar_emoji_final.png`
   (+ `_full.png`).
 
 ### Restyling — Palette del precetto (STANDARD_VISIVO) su tutta l'interfaccia
@@ -212,7 +223,7 @@ versioning semantico: `MAJOR.MINOR.PATCH`.
   X/Y/Z nella convenzione standard 3D (rosso/verde/blu); righelli e etichette
   goniometro in palette.
 - Verifica Windows: contrasto WCAG **AAA su 6 coppie campione** (≥7.28:1);
-  screenshot PRIMA/DOPO e campionamento PIL in `%TEMP%\opencode\`; test
+  screenshot PRIMA/DOPO e campionamento PIL in ``; test
   `python -m pytest Test/ -q` → 10 passed.
 
 ### Fix — Outliner: nomi non aggiornati a parità di conteggio (collaudo D1)

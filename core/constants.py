@@ -1,8 +1,8 @@
-﻿"""TriviumCAD core - costanti globali (estratte da triviumcad.py, v1.3.0)."""
+﻿"""TriviumCAD core - costanti globali (estratte da triviumcad.py, v1.3.1)."""
 from typing import List, Dict, Any
 
 APP_NAME = "TriviumCAD"
-VERSION = "1.3.0"
+VERSION = "1.3.1"
 
 # =============================================================================
 # PALETTE STANDARD N47Lab (STANDARD_VISIVO.md — standard scuro)

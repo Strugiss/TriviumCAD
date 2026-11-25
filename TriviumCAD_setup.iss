@@ -1,8 +1,8 @@
-; InnoSetup script per TriviumCAD v1.3.0
+; InnoSetup script per TriviumCAD v1.3.1
 ; Generato automaticamente
 
 #define MyAppName "TriviumCAD"
-#define MyAppVersion "1.3.0"
+#define MyAppVersion "1.3.1"
 #define MyAppPublisher "N47Lab Team"
 #define MyAppURL "https://n47lab.it"
 #define MyAppExeName "TriviumCAD.exe"
